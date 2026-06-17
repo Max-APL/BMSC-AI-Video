@@ -1,0 +1,269 @@
+{
+  "info": {
+    "_postman_id": "5e794c5d-e4e9-4d7b-9a78-0cb2d2e5f2d1",
+    "name": "BMSC AI Video Backend",
+    "description": "Coleccion para probar el backend local de carga, transcripcion y busqueda TF-IDF sobre videos de capacitacion.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "video_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Healthcheck",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Ver Dependencias Locales",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/system/dependencies",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "system",
+            "dependencies"
+          ]
+        },
+        "description": "Confirma si el proceso del backend ve ffmpeg en PATH y que configuracion local de Whisper esta usando."
+      }
+    },
+    {
+      "name": "Listar Videos",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Subir Video",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const isPostman = typeof pm !== 'undefined';",
+              "const isBruno = typeof bru !== 'undefined' && typeof res !== 'undefined';",
+              "",
+              "if (isPostman && pm.response.code >= 200 && pm.response.code < 300) {",
+              "  const data = pm.response.json();",
+              "  if (data.id) pm.collectionVariables.set('video_id', data.id);",
+              "}",
+              "",
+              "if (isBruno && res.getStatus() >= 200 && res.getStatus() < 300) {",
+              "  const data = res.getBody();",
+              "  if (data.id && typeof bru.setVar === 'function') bru.setVar('video_id', data.id);",
+              "  if (data.id && typeof bru.setEnvVar === 'function') bru.setEnvVar('video_id', data.id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/videos",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos"
+          ]
+        },
+        "description": "Selecciona un archivo .mp4, .mkv o .mvk en el campo form-data `file`. La respuesta guarda automaticamente `video_id` como variable de coleccion."
+      }
+    },
+    {
+      "name": "Obtener Estado Y Progreso Del Video",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}"
+          ]
+        },
+        "description": "Usa esta request para saber si el video sigue en cola/procesamiento, cuanto progreso lleva y si ya esta listo para transcripcion/consultas."
+      }
+    },
+    {
+      "name": "Reprocesar Video",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/process",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "process"
+          ]
+        },
+        "description": "Vuelve a enviar el video a procesamiento en background."
+      }
+    },
+    {
+      "name": "Reconstruir Indice De Busqueda",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/index",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "index"
+          ]
+        },
+        "description": "Reconstruye chunks.json desde transcript.json sin volver a transcribir el video. Usalo despues de cambiar la logica de busqueda."
+      }
+    },
+    {
+      "name": "Obtener Transcripcion",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/transcript",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "transcript"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Consultar Video",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"autenticacion multifactor\",\n  \"top_k\": 5,\n  \"min_score\": 0.05\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/query",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "query"
+          ]
+        },
+        "description": "Devuelve coincidencias con score TF-IDF/coseno y timestamps start_timecode/end_timecode."
+      }
+    },
+    {
+      "name": "Preguntar Al Video",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"desde donde descargo la app de banca movil?\",\n  \"top_k\": 3,\n  \"min_score\": 0.0\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/ask",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "ask"
+          ]
+        },
+        "description": "Devuelve una respuesta extractiva estilo bot, sin LLM, basada solo en los fragmentos encontrados del video."
+      }
+    },
+    {
+      "name": "Eliminar Video",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}"
+          ]
+        }
+      }
+    }
+  ]
+}
