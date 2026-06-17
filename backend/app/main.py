@@ -4,13 +4,18 @@ from typing import List
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from .config import settings
 from .debug import log_event
+from .manual_exports import ManualExportError
 from .models import (
     AnswerRequest,
     AnswerResponse,
     HealthResponse,
+    ManualMetadata,
+    ManualRequest,
+    ManualResponse,
     QueryRequest,
     QueryResponse,
     SystemDependenciesResponse,
@@ -33,6 +38,7 @@ allow_origins = list(settings.cors_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -123,6 +129,75 @@ def get_transcript(video_id: str) -> TranscriptResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.get("/videos/{video_id}/media", response_class=FileResponse)
+def get_video_media(video_id: str) -> FileResponse:
+    try:
+        source_path, media_type, filename = service.get_video_media(video_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc
+
+    return FileResponse(
+        path=source_path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="inline",
+    )
+
+
+@app.post("/videos/{video_id}/manuals", response_model=ManualMetadata, status_code=status.HTTP_202_ACCEPTED)
+def create_manual(
+    video_id: str,
+    request: ManualRequest,
+    background_tasks: BackgroundTasks,
+) -> ManualMetadata:
+    try:
+        metadata = service.create_manual(video_id, request)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    background_tasks.add_task(service.process_manual, video_id, metadata.id)
+    return metadata
+
+
+@app.get("/videos/{video_id}/manuals", response_model=List[ManualMetadata])
+def list_manuals(video_id: str) -> List[ManualMetadata]:
+    try:
+        return service.list_manuals(video_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc
+
+
+@app.get("/videos/{video_id}/manuals/{manual_id}", response_model=ManualResponse)
+def get_manual(video_id: str, manual_id: str, include_content: bool = False) -> ManualResponse:
+    try:
+        return service.get_manual(video_id, manual_id, include_content=include_content)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manual no encontrado") from exc
+
+
+@app.get("/videos/{video_id}/manuals/{manual_id}/download", response_class=FileResponse)
+def download_manual(video_id: str, manual_id: str, format: str = "markdown") -> FileResponse:
+    try:
+        path, filename, media_type = service.get_manual_file(video_id, manual_id, format)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manual no encontrado") from exc
+    except ManualExportError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="attachment",
+    )
 
 
 @app.post("/videos/{video_id}/query", response_model=QueryResponse)

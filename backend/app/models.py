@@ -13,6 +13,18 @@ class VideoStatus(str, Enum):
     failed = "failed"
 
 
+class ManualMode(str, Enum):
+    extractive = "extractive"
+    llm = "llm"
+
+
+class ManualStatus(str, Enum):
+    queued = "queued"
+    processing = "processing"
+    ready = "ready"
+    failed = "failed"
+
+
 class VideoMetadata(BaseModel):
     id: str
     original_filename: str
@@ -86,6 +98,43 @@ class AnswerResponse(BaseModel):
     answer: str
     confidence: float
     sources: List[SearchMatch]
+
+
+class ManualRequest(BaseModel):
+    mode: ManualMode = Field(ManualMode.extractive, description="Motor de generacion")
+    format: str = Field("markdown", description="Formato base de salida")
+    provider: Optional[str] = Field(None, description="Proveedor local del LLM")
+    model: Optional[str] = Field(None, description="Modelo local para modo llm")
+    include_timestamps: bool = True
+
+
+class ManualMetadata(BaseModel):
+    id: str
+    video_id: str
+    mode: ManualMode
+    status: ManualStatus
+    format: str = "markdown"
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    include_timestamps: bool = True
+    title: str
+    filename: str
+    created_at: str
+    updated_at: str
+    processing_started_at: Optional[str] = None
+    processing_finished_at: Optional[str] = None
+    processing_stage: Optional[str] = None
+    progress: float = 0.0
+    current_section: Optional[str] = None
+    last_generated_text: Optional[str] = None
+    section_count: int = 0
+    word_count: int = 0
+    error: Optional[str] = None
+
+
+class ManualResponse(BaseModel):
+    metadata: ManualMetadata
+    content: Optional[str] = None
 
 
 class TranscriptResponse(BaseModel):

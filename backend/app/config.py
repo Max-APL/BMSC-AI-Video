@@ -26,6 +26,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 def _env_path(name: str) -> Optional[Path]:
     value = os.getenv(name)
     if not value:
@@ -62,9 +72,24 @@ class Settings:
     search_chunk_seconds: int = _env_int("SEARCH_CHUNK_SECONDS", 14)
     search_chunk_max_chars: int = _env_int("SEARCH_CHUNK_MAX_CHARS", 320)
 
+    manual_chunk_seconds: int = _env_int("MANUAL_CHUNK_SECONDS", 300)
+    manual_llm_chunk_max_chars: int = _env_int("MANUAL_LLM_CHUNK_MAX_CHARS", 7000)
+
+    llm_provider: str = os.getenv("LLM_PROVIDER", "ollama")
+    llm_base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:11434").rstrip("/")
+    llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")
+    llm_timeout_seconds: int = _env_int("LLM_TIMEOUT_SECONDS", 900)
+    llm_temperature: float = _env_float("LLM_TEMPERATURE", 0.2)
+    llm_num_ctx: int = _env_int("LLM_NUM_CTX", 8192)
+
     cors_origins: Tuple[str, ...] = _env_origins(
         "CORS_ORIGINS",
-        "http://localhost:5173,http://localhost:3000",
+        "http://localhost:5173,http://localhost:5174,http://localhost:3000,"
+        "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:3000",
+    )
+    cors_origin_regex: Optional[str] = os.getenv(
+        "CORS_ORIGIN_REGEX",
+        r"^http://(localhost|127\.0\.0\.1):\d+$",
     )
 
 

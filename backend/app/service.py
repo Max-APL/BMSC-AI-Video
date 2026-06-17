@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import mimetypes
 import traceback
+import uuid
 from pathlib import Path
 from threading import Lock
-from typing import List
+from typing import List, Tuple
 
 from fastapi import UploadFile
 
@@ -11,10 +13,17 @@ from .answering import build_extractive_answer
 from .chunking import build_search_chunks
 from .config import Settings
 from .debug import log_event
+from .manual_exports import ManualExportError, export_manual
+from .manual_generation import build_extractive_manual, build_llm_manual, count_words, manual_title
 from .models import (
+    AnswerResponse,
+    ManualMetadata,
+    ManualMode,
+    ManualRequest,
+    ManualResponse,
+    ManualStatus,
     QueryResponse,
     SearchMatch,
-    AnswerResponse,
     SystemDependenciesResponse,
     TranscriptResponse,
     VideoMetadata,
@@ -63,6 +72,7 @@ class VideoService:
         self.transcriber = transcriber
         self.search_engine = search_engine
         self._processing_lock = Lock()
+        self._manual_lock = Lock()
 
     async def create_video(self, upload: UploadFile) -> VideoMetadata:
         filename = upload.filename or "video"
@@ -250,6 +260,207 @@ class VideoService:
             video_id=video_id,
             segments=segments,
         )
+
+    def get_video_media(self, video_id: str) -> Tuple[Path, str, str]:
+        metadata = self.storage.load_metadata(video_id)
+        source_path = self.storage.source_path(metadata)
+        if not source_path.exists():
+            raise FileNotFoundError(video_id)
+
+        guessed_type = mimetypes.guess_type(metadata.original_filename)[0]
+        media_type = metadata.content_type or guessed_type or "application/octet-stream"
+        return source_path, media_type, metadata.original_filename
+
+    def create_manual(self, video_id: str, request: ManualRequest) -> ManualMetadata:
+        if request.format != "markdown":
+            raise ValueError("Formato no soportado. Usa format='markdown'.")
+
+        video = self.storage.load_metadata(video_id)
+        if video.status != VideoStatus.ready:
+            raise RuntimeError(
+                f"El video no esta listo para generar manuales. Estado actual: {video.status.value}"
+            )
+
+        segments = self.storage.load_transcript(video_id)
+        if not segments:
+            raise RuntimeError("No hay transcripcion disponible para generar el manual.")
+
+        provider = request.provider or self.settings.llm_provider
+        model = request.model or self.settings.llm_model
+        if request.mode == ManualMode.extractive:
+            provider = None
+            model = None
+
+        manual_id = uuid.uuid4().hex
+        now = utc_now()
+        metadata = ManualMetadata(
+            id=manual_id,
+            video_id=video_id,
+            mode=request.mode,
+            status=ManualStatus.queued,
+            format=request.format,
+            provider=provider,
+            model=model,
+            include_timestamps=request.include_timestamps,
+            title=manual_title(video),
+            filename=f"manual-{request.mode.value}-{manual_id[:8]}.md",
+            created_at=now,
+            updated_at=now,
+        )
+        self.storage.save_manual_metadata(metadata)
+        log_event(
+            "Manual generation queued "
+            f"mode={metadata.mode.value} provider={metadata.provider} model={metadata.model}",
+            video_id,
+        )
+        return metadata
+
+    def process_manual(self, video_id: str, manual_id: str) -> None:
+        log_event(f"Manual processing requested manual_id={manual_id}", video_id)
+        with self._manual_lock:
+            log_event(f"Manual lock acquired manual_id={manual_id}", video_id)
+            self._process_manual_locked(video_id, manual_id)
+
+    def _process_manual_locked(self, video_id: str, manual_id: str) -> None:
+        metadata = self.storage.update_manual_metadata(
+            video_id,
+            manual_id,
+            status=ManualStatus.processing,
+            processing_started_at=utc_now(),
+            processing_finished_at=None,
+            processing_stage="preparing",
+            progress=1.0,
+            current_section=None,
+            last_generated_text=None,
+            error=None,
+        )
+        try:
+            video = self.storage.load_metadata(video_id)
+            segments = self.storage.load_transcript(video_id)
+            if not segments:
+                raise RuntimeError("No hay transcripcion disponible para generar el manual.")
+
+            if metadata.mode == ManualMode.extractive:
+                self.storage.update_manual_metadata(
+                    video_id,
+                    manual_id,
+                    processing_stage="building_extractive_manual",
+                    progress=35.0,
+                )
+                result = build_extractive_manual(
+                    video,
+                    segments,
+                    chunk_seconds=self.settings.manual_chunk_seconds,
+                    include_timestamps=metadata.include_timestamps,
+                )
+            elif metadata.mode == ManualMode.llm:
+                self.storage.update_manual_metadata(
+                    video_id,
+                    manual_id,
+                    processing_stage="generating_with_llm",
+                    progress=5.0,
+                )
+                progress_state = {"last_saved_length": 0}
+
+                def save_llm_progress(content: str, block_index: int, total_blocks: int, delta: str) -> None:
+                    content_length = len(content)
+                    if delta and content_length - progress_state["last_saved_length"] < 160:
+                        return
+                    progress_state["last_saved_length"] = content_length
+                    progress = 5.0
+                    if total_blocks > 0 and block_index > 0:
+                        progress = min(98.0, round(((block_index - 0.35) / total_blocks) * 100, 2))
+                    self.storage.save_manual_content(video_id, manual_id, content)
+                    self.storage.update_manual_metadata(
+                        video_id,
+                        manual_id,
+                        processing_stage="generating_with_llm",
+                        progress=progress,
+                        current_section=(
+                            f"Bloque {block_index} de {total_blocks}"
+                            if block_index > 0
+                            else f"Preparando {total_blocks} bloques"
+                        ),
+                        last_generated_text=(delta or content[-240:])[-240:],
+                        word_count=count_words(content),
+                    )
+
+                result = build_llm_manual(
+                    video,
+                    segments,
+                    settings=self.settings,
+                    provider=metadata.provider or self.settings.llm_provider,
+                    model=metadata.model or self.settings.llm_model,
+                    include_timestamps=metadata.include_timestamps,
+                    on_progress=save_llm_progress,
+                )
+            else:
+                raise RuntimeError(f"Modo de manual no soportado: {metadata.mode}")
+
+            self.storage.save_manual_content(video_id, manual_id, result.content)
+            self.storage.update_manual_metadata(
+                video_id,
+                manual_id,
+                status=ManualStatus.ready,
+                processing_finished_at=utc_now(),
+                processing_stage="ready",
+                progress=100.0,
+                current_section=None,
+                last_generated_text=None,
+                section_count=result.section_count,
+                word_count=result.word_count,
+                error=None,
+            )
+            log_event(
+                "Manual generation finished "
+                f"manual_id={manual_id} sections={result.section_count} words={result.word_count}",
+                video_id,
+            )
+        except Exception as exc:
+            log_event(f"Manual generation failed manual_id={manual_id} error={exc}", video_id)
+            print(traceback.format_exc(), flush=True)
+            self.storage.update_manual_metadata(
+                video_id,
+                manual_id,
+                status=ManualStatus.failed,
+                processing_finished_at=utc_now(),
+                processing_stage="failed",
+                error=str(exc),
+            )
+
+    def list_manuals(self, video_id: str) -> List[ManualMetadata]:
+        self.storage.load_metadata(video_id)
+        return self.storage.list_manual_metadata(video_id)
+
+    def get_manual(self, video_id: str, manual_id: str, include_content: bool = False) -> ManualResponse:
+        metadata = self.storage.load_manual_metadata(video_id, manual_id)
+        content = None
+        if include_content:
+            content = self.storage.load_manual_content(video_id, manual_id)
+        return ManualResponse(metadata=metadata, content=content)
+
+    def get_manual_file(self, video_id: str, manual_id: str, output_format: str) -> Tuple[Path, str, str]:
+        metadata = self.storage.load_manual_metadata(video_id, manual_id)
+        if metadata.status != ManualStatus.ready:
+            raise RuntimeError(f"El manual aun no esta listo. Estado actual: {metadata.status.value}")
+        output_format = output_format.lower()
+        content_path = self.storage.manual_content_path(video_id, manual_id)
+        if not content_path.exists():
+            raise FileNotFoundError(manual_id)
+        content = self.storage.load_manual_content(video_id, manual_id)
+        export_path = self.storage.manual_export_path(video_id, manual_id, output_format)
+        try:
+            path = export_manual(content, export_path, output_format)
+        except ManualExportError:
+            raise
+        suffix = "md" if output_format == "markdown" else output_format
+        media_types = {
+            "markdown": "text/markdown; charset=utf-8",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "pdf": "application/pdf",
+        }
+        filename = f"{Path(metadata.filename).stem}.{suffix}"
+        return path, filename, media_types.get(output_format, "application/octet-stream")
 
     def query_video(
         self,

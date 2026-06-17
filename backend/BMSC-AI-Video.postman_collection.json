@@ -15,6 +15,11 @@
       "key": "video_id",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "manual_id",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -175,6 +180,25 @@
       }
     },
     {
+      "name": "Reproducir Archivo Del Video",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/media",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "media"
+          ]
+        },
+        "description": "Devuelve el archivo original del video para reproducirlo en navegador o validar que el media endpoint funciona."
+      }
+    },
+    {
       "name": "Obtener Transcripcion",
       "request": {
         "method": "GET",
@@ -190,6 +214,216 @@
             "transcript"
           ]
         }
+      }
+    },
+    {
+      "name": "Listar Manuales",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals"
+          ]
+        },
+        "description": "Lista los manuales generados para el video seleccionado."
+      }
+    },
+    {
+      "name": "Generar Manual Extractivo Sin LLM",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code >= 200 && pm.response.code < 300) {",
+              "  const data = pm.response.json();",
+              "  if (data.id) pm.collectionVariables.set('manual_id', data.id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"extractive\",\n  \"format\": \"markdown\",\n  \"include_timestamps\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals"
+          ]
+        },
+        "description": "Genera un manual fiel a la transcripcion sin usar LLM. Guarda manual_id como variable de coleccion."
+      }
+    },
+    {
+      "name": "Generar Manual Con LLM Local",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code >= 200 && pm.response.code < 300) {",
+              "  const data = pm.response.json();",
+              "  if (data.id) pm.collectionVariables.set('manual_id', data.id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"llm\",\n  \"format\": \"markdown\",\n  \"provider\": \"ollama\",\n  \"model\": \"llama3.1:8b\",\n  \"include_timestamps\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals"
+          ]
+        },
+        "description": "Genera un manual redactado por LLM local via Ollama. Requiere Ollama corriendo y llama3.1:8b descargado."
+      }
+    },
+    {
+      "name": "Obtener Manual",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals/{{manual_id}}?include_content=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals",
+            "{{manual_id}}"
+          ],
+          "query": [
+            {
+              "key": "include_content",
+              "value": "true"
+            }
+          ]
+        },
+        "description": "Consulta el estado y, si esta listo, el contenido Markdown del manual."
+      }
+    },
+    {
+      "name": "Descargar Manual Markdown",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals/{{manual_id}}/download?format=markdown",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals",
+            "{{manual_id}}",
+            "download"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "markdown"
+            }
+          ]
+        },
+        "description": "Descarga el manual generado en formato Markdown."
+      }
+    },
+    {
+      "name": "Descargar Manual DOCX",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals/{{manual_id}}/download?format=docx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals",
+            "{{manual_id}}",
+            "download"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "docx"
+            }
+          ]
+        },
+        "description": "Descarga el manual generado como documento Word. Requiere python-docx instalado."
+      }
+    },
+    {
+      "name": "Descargar Manual PDF",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals/{{manual_id}}/download?format=pdf",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals",
+            "{{manual_id}}",
+            "download"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "pdf"
+            }
+          ]
+        },
+        "description": "Descarga el manual generado como PDF. Requiere reportlab instalado."
       }
     },
     {

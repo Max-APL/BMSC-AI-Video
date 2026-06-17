@@ -10,7 +10,7 @@ from typing import Iterable, List
 from fastapi import UploadFile
 
 from .config import Settings
-from .models import SearchChunk, TranscriptSegment, VideoMetadata, VideoStatus
+from .models import ManualMetadata, SearchChunk, TranscriptSegment, VideoMetadata, VideoStatus
 
 
 def utc_now() -> str:
@@ -52,6 +52,19 @@ class VideoStorage:
 
     def source_path(self, metadata: VideoMetadata) -> Path:
         return self.video_dir(metadata.id) / metadata.stored_filename
+
+    def manuals_dir(self, video_id: str) -> Path:
+        return self.video_dir(video_id) / "manuals"
+
+    def manual_metadata_path(self, video_id: str, manual_id: str) -> Path:
+        return self.manuals_dir(video_id) / manual_id / "metadata.json"
+
+    def manual_content_path(self, video_id: str, manual_id: str) -> Path:
+        return self.manuals_dir(video_id) / manual_id / "manual.md"
+
+    def manual_export_path(self, video_id: str, manual_id: str, output_format: str) -> Path:
+        suffix = "md" if output_format == "markdown" else output_format
+        return self.manuals_dir(video_id) / manual_id / f"manual.{suffix}"
 
     async def create_video(self, upload: UploadFile) -> VideoMetadata:
         original_filename = sanitize_filename(upload.filename or "video")
@@ -130,6 +143,46 @@ class VideoStorage:
         if not path.exists():
             return []
         return [SearchChunk(**item) for item in self._read_json(path)]
+
+    def save_manual_metadata(self, metadata: ManualMetadata) -> None:
+        self._write_json(
+            self.manual_metadata_path(metadata.video_id, metadata.id),
+            model_to_dict(metadata),
+        )
+
+    def load_manual_metadata(self, video_id: str, manual_id: str) -> ManualMetadata:
+        path = self.manual_metadata_path(video_id, manual_id)
+        if not path.exists():
+            raise FileNotFoundError(manual_id)
+        return ManualMetadata(**self._read_json(path))
+
+    def list_manual_metadata(self, video_id: str) -> List[ManualMetadata]:
+        metadata_items: List[ManualMetadata] = []
+        for path in sorted(self.manuals_dir(video_id).glob("*/metadata.json")):
+            metadata_items.append(ManualMetadata(**self._read_json(path)))
+        return metadata_items
+
+    def update_manual_metadata(self, video_id: str, manual_id: str, **updates) -> ManualMetadata:
+        metadata = self.load_manual_metadata(video_id, manual_id)
+        data = model_to_dict(metadata)
+        data.update(updates)
+        data["updated_at"] = utc_now()
+        updated = ManualMetadata(**data)
+        self.save_manual_metadata(updated)
+        return updated
+
+    def save_manual_content(self, video_id: str, manual_id: str, content: str) -> None:
+        path = self.manual_content_path(video_id, manual_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(path.suffix + ".tmp")
+        temp_path.write_text(content, encoding="utf-8")
+        temp_path.replace(path)
+
+    def load_manual_content(self, video_id: str, manual_id: str) -> str:
+        path = self.manual_content_path(video_id, manual_id)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
 
     def delete_video(self, video_id: str) -> None:
         path = self.video_dir(video_id)
