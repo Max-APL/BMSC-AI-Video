@@ -20,6 +20,11 @@
       "key": "manual_id",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "manual_asset_path",
+      "value": "screenshots/section-001-01.jpg",
+      "type": "string"
     }
   ],
   "item": [
@@ -261,7 +266,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"mode\": \"extractive\",\n  \"format\": \"markdown\",\n  \"include_timestamps\": true\n}"
+          "raw": "{\n  \"mode\": \"extractive\",\n  \"format\": \"markdown\",\n  \"include_timestamps\": true,\n  \"include_screenshots\": true\n}"
         },
         "url": {
           "raw": "{{base_url}}/videos/{{video_id}}/manuals",
@@ -303,7 +308,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"mode\": \"llm\",\n  \"format\": \"markdown\",\n  \"provider\": \"ollama\",\n  \"model\": \"llama3.1:8b\",\n  \"include_timestamps\": true\n}"
+          "raw": "{\n  \"mode\": \"llm\",\n  \"format\": \"markdown\",\n  \"provider\": \"ollama\",\n  \"model\": \"llama3.1:8b\",\n  \"include_timestamps\": true,\n  \"include_screenshots\": true\n}"
         },
         "url": {
           "raw": "{{base_url}}/videos/{{video_id}}/manuals",
@@ -343,6 +348,28 @@
           ]
         },
         "description": "Consulta el estado y, si esta listo, el contenido Markdown del manual."
+      }
+    },
+    {
+      "name": "Ver Captura Del Manual",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/videos/{{video_id}}/manuals/{{manual_id}}/assets/{{manual_asset_path}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "videos",
+            "{{video_id}}",
+            "manuals",
+            "{{manual_id}}",
+            "assets",
+            "{{manual_asset_path}}"
+          ]
+        },
+        "description": "Devuelve una captura embebida en el manual. Por defecto usa screenshots/section-001-01.jpg."
       }
     },
     {

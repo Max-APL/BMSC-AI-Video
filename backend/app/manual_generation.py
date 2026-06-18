@@ -5,8 +5,9 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from .config import Settings
 from .models import TranscriptSegment, VideoMetadata
@@ -22,10 +23,16 @@ class ManualBuildResult:
 @dataclass(frozen=True)
 class TranscriptBlock:
     index: int
+    start_seconds: float
+    end_seconds: float
     start_timecode: str
     end_timecode: str
     text: str
     segment_count: int
+
+
+ScreenshotReference = Tuple[str, str]
+ScreenshotMap = Dict[int, List[ScreenshotReference]]
 
 
 ACTION_PATTERNS = (
@@ -39,14 +46,23 @@ ACTION_PATTERNS = (
     "ingresa",
     "selecciona",
     "presiona",
+    "presione",
     "haz clic",
     "registra",
     "descarga",
     "actualiza",
+    "introduce",
+    "escoge",
+    "elige",
     "debe",
     "recuerda",
     "verifica",
     "confirma",
+    "opcion",
+    "opción",
+    "al ingresar",
+    "al seleccionarla",
+    "para registrar",
 )
 
 
@@ -56,34 +72,30 @@ def build_extractive_manual(
     *,
     chunk_seconds: int,
     include_timestamps: bool,
+    generated_at: Optional[str] = None,
+    screenshots_by_block: Optional[ScreenshotMap] = None,
 ) -> ManualBuildResult:
+    screenshots_by_block = screenshots_by_block or {}
     blocks = build_time_blocks(segments, chunk_seconds=chunk_seconds)
     title = manual_title(metadata)
     full_text = clean_transcript_text("\n".join(block.text for block in blocks))
-    actions = _detect_actions(full_text, limit=14)
+    actions = deduplicate_sentences(_detect_actions(full_text, limit=14))
     notes = detect_notes(full_text)
     lines = [
         f"# {title}",
         "",
-        "## Proposito del manual",
+        "## Objeto",
         "",
         (
-            "Este documento convierte el contenido de la capacitacion en una guia "
-            "de consulta. Su objetivo es presentar el procedimiento explicado de "
-            "forma ordenada, con lenguaje operativo y facil de seguir."
+            f"Documentar el procedimiento explicado en el video para {manual_subject(metadata).lower()}."
         ),
         "",
         "## Informacion del material",
         "",
         f"- Material de origen: {metadata.original_filename}",
         f"- Duracion aproximada: {format_duration(metadata.duration_seconds)}",
+        f"- Fecha de generacion: {format_datetime_lapaz(generated_at)}",
         "- Metodo de generacion: manual extractivo sin LLM",
-        "",
-        "## Como usar este manual",
-        "",
-        "1. Revise primero el procedimiento resumido.",
-        "2. Consulte el desarrollo para entender el detalle de cada etapa.",
-        "3. Use el anexo de referencias solo si necesita validar el punto exacto en el video.",
         "",
         "## Procedimiento resumido",
         "",
@@ -98,39 +110,39 @@ def build_extractive_manual(
             "en que se presentan."
         )
 
-    lines.extend(["", "## Desarrollo", ""])
+    lines.extend(["", "## Desarrollo detallado", ""])
 
     for block in blocks:
+        section_lines: List[str] = []
         section_text = clean_transcript_text(block.text)
         summary = summarize_block_text(section_text)
-        lines.extend(
+        block_actions = deduplicate_sentences(_detect_actions(section_text, limit=8))
+        block_notes = detect_notes(section_text)
+        section_lines.extend(
             [
                 f"### Etapa {block.index}",
                 "",
-                summary,
-                "",
             ]
         )
+        section_lines.extend(["**Descripcion**", "", summary, ""])
+        if block_actions:
+            section_lines.extend(["**Pasos identificados**", ""])
+            for action_index, action in enumerate(block_actions, start=1):
+                section_lines.append(f"{action_index}. {sentence_to_instruction(action)}")
+            section_lines.append("")
+        if block_notes:
+            section_lines.extend(["**Consideraciones**", ""])
+            for note in block_notes:
+                section_lines.append(f"- {note}")
+            section_lines.append("")
+        lines.extend(insert_screenshots_in_lines(section_lines, screenshots_by_block.get(block.index)))
+        lines.append("")
 
     if notes:
         lines.extend(["## Puntos de control", ""])
-        for note in notes:
+        for note in deduplicate_sentences(notes):
             lines.append(f"- {note}")
         lines.append("")
-
-    lines.extend(
-        [
-            "## Cierre",
-            "",
-            (
-                "Al completar los pasos descritos, el usuario deberia poder aplicar "
-                "el procedimiento explicado en la capacitacion de forma consistente. "
-                "Si algun paso no coincide con la aplicacion o sistema real, revise "
-                "la capacitacion original o la documentacion interna vigente."
-            ),
-            "",
-        ]
-    )
 
     if include_timestamps:
         lines.extend(["## Anexo: referencias de revision", ""])
@@ -154,14 +166,17 @@ def build_llm_manual(
     provider: str,
     model: str,
     include_timestamps: bool,
+    generated_at: Optional[str] = None,
+    screenshots_by_block: Optional[ScreenshotMap] = None,
     on_progress: Optional[Callable[[str, int, int, str], None]] = None,
 ) -> ManualBuildResult:
     if provider != "ollama":
         raise ValueError("Proveedor LLM no soportado. Usa provider='ollama'.")
 
+    screenshots_by_block = screenshots_by_block or {}
     blocks = build_text_blocks(
         segments,
-        chunk_seconds=settings.manual_chunk_seconds,
+        chunk_seconds=settings.manual_llm_chunk_seconds,
         max_chars=settings.manual_llm_chunk_max_chars,
     )
     client = OllamaClient(
@@ -170,35 +185,24 @@ def build_llm_manual(
         timeout_seconds=settings.llm_timeout_seconds,
         temperature=settings.llm_temperature,
         num_ctx=settings.llm_num_ctx,
+        terminology_hints=settings.manual_terminology_hints,
     )
     title = manual_title(metadata)
-    lines = [
-        f"# {title}",
-        "",
-        "## Informacion del video",
-        "",
-        f"- Archivo: {metadata.original_filename}",
-        f"- Duracion: {format_duration(metadata.duration_seconds)}",
-        f"- Modo de generacion: LLM local via {provider}",
-        f"- Modelo: {model}",
-        "",
-        "## Objetivo",
-        "",
-        (
-            "Este manual fue redactado a partir de la transcripcion local del video. "
-            "Las referencias temporales se conservan solo como apoyo de revision, no "
-            "como reemplazo del procedimiento."
-        ),
-        "",
-        "## Desarrollo",
-        "",
-    ]
+    lines = build_manual_front_matter(
+        metadata,
+        title=title,
+        generation_label=f"LLM local via {provider}",
+        model=model,
+        generated_at=generated_at,
+    )
 
     if on_progress:
         on_progress("\n".join(lines).strip() + "\n", 0, len(blocks), "")
 
+    generated_sections: List[str] = []
     for block in blocks:
         prefix = "\n".join(lines).strip() + "\n\n"
+        block_screenshots = screenshots_by_block.get(block.index)
 
         def handle_delta(partial_section: str, delta: str) -> None:
             if on_progress:
@@ -208,16 +212,28 @@ def build_llm_manual(
             title=title,
             block=block,
             include_timestamps=include_timestamps,
+            visual_references=block_screenshots,
             on_delta=handle_delta,
         )
-        lines.append(clean_markdown(generated))
-        lines.append("")
+        normalized = normalize_llm_section_markdown(generated)
+        normalized = insert_section_screenshots(
+            normalized,
+            block_screenshots,
+        )
+        generated_sections.append(normalized)
         if on_progress:
-            on_progress("\n".join(lines).strip() + "\n", block.index, len(blocks), "")
+            preview = "\n\n".join(lines + ["## Procedimiento detallado"] + generated_sections)
+            on_progress(preview.strip() + "\n", block.index, len(blocks), "")
+
+    lines.extend(build_professional_overview(metadata).splitlines())
+    lines.extend(["", "## Procedimiento detallado", ""])
+    for generated_section in generated_sections:
+        lines.append(generated_section)
+        lines.append("")
 
     lines.extend(
         [
-            "## Referencias de revision",
+            "## Anexo: referencias de revision",
             "",
         ]
     )
@@ -243,12 +259,14 @@ class OllamaClient:
         timeout_seconds: int,
         temperature: float,
         num_ctx: int,
+        terminology_hints: str,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.temperature = temperature
         self.num_ctx = num_ctx
+        self.manual_terminology_hints = terminology_hints
 
     def generate_section(
         self,
@@ -256,33 +274,58 @@ class OllamaClient:
         title: str,
         block: TranscriptBlock,
         include_timestamps: bool,
+        visual_references: Optional[List[ScreenshotReference]] = None,
         on_delta: Optional[Callable[[str, str], None]] = None,
     ) -> str:
         timestamp_instruction = (
-            "No insertes timestamps dentro del texto principal. Si necesitas conservar trazabilidad, agrega una linea final breve llamada 'Referencia de revision' con el rango del bloque."
+            "No insertes timestamps dentro del texto. La trazabilidad se generara en un anexo separado."
             if include_timestamps
             else "No incluyas timestamps."
         )
         system_prompt = (
-            "Eres un redactor tecnico experto en crear manuales de capacitacion. "
-            "Trabajas solo con la transcripcion proporcionada. No inventes datos, "
-            "no agregues requisitos no mencionados y no uses informacion externa. "
-            "Responde exclusivamente en Markdown."
+            "Eres un redactor tecnico senior especializado en manuales operativos "
+            "corporativos. Transformas transcripciones en procedimientos claros, "
+            "formales y auditables. No inventes datos, no agregues requisitos no "
+            "mencionados y no uses informacion externa. Si un dato no aparece en la "
+            "transcripcion, omitelo. Corrige errores menores de transcripcion solo "
+            "cuando el contexto sea claro. Responde exclusivamente en Markdown simple."
         )
         user_prompt = f"""
-Genera una seccion profesional para un manual.
+Genera una seccion profesional para un manual operativo.
 
 Manual: {title}
 Bloque: {block.index}
 Rango de video: {block.start_timecode} - {block.end_timecode}
+Terminologia preferente: {self.terminology_hints()}
+Puntos visuales relevantes del bloque:
+{format_visual_references(visual_references)}
+
+Formato obligatorio:
+### Titulo claro de la seccion
+Parrafo breve que explique el proposito de esta parte.
+
+#### Procedimiento
+1. Paso redactado con verbo de accion.
+2. Paso redactado con verbo de accion.
+
+#### Consideraciones
+- Nota relevante si aparece en la transcripcion.
 
 Instrucciones:
 - Escribe en espanol claro y formal.
-- Usa un titulo de seccion especifico.
-- Incluye una explicacion breve.
-- Si hay procedimiento, conviertelo en pasos numerados.
-- Agrega notas o advertencias solo si aparecen en la transcripcion.
 - No escribas como transcripcion y no pegues dialogos.
+- Cada paso debe estar soportado por la transcripcion del bloque.
+- Si el bloque solo contiene una explicacion, redacta descripcion y consideraciones; no inventes pasos.
+- Las capturas se insertan automaticamente; no las menciones en el texto.
+- No uses encabezados subrayados con === o ---.
+- No uses asteriscos para vinetas; usa guion medio.
+- No menciones al modelo, a la IA ni a la transcripcion.
+- No incluyas una seccion de referencias.
+- No mezcles vinetas dentro de pasos numerados; si hay alternativas, crea una subseccion "#### Metodos disponibles".
+- Cuando existan opciones, botones, campos, codigos o mensajes de confirmacion, describe la accion o resultado asociado si aparece en la transcripcion.
+- No omitas estados visibles relevantes del proceso, como confirmaciones, validaciones, codigos recibidos o mensajes en pantalla, si aparecen en la transcripcion.
+- Integra los puntos visuales relevantes como pasos, metodos o consideraciones cuando correspondan; no los llames capturas ni imagenes.
+- Usa la terminologia preferente cuando la transcripcion tenga variantes foneticas o errores claros.
 - {timestamp_instruction}
 - Mantente fiel a la transcripcion aunque tenga errores menores.
 
@@ -290,6 +333,48 @@ Transcripcion:
 {block.text}
 """.strip()
         return self.chat(system_prompt=system_prompt, user_prompt=user_prompt, on_delta=on_delta)
+
+    def terminology_hints(self) -> str:
+        hints = getattr(self, "manual_terminology_hints", "")
+        return hints or "No definida"
+
+    def generate_overview(
+        self,
+        *,
+        title: str,
+        transcript_excerpt: str,
+        section_summaries: str,
+    ) -> str:
+        system_prompt = (
+            "Eres un redactor tecnico senior. Generas la apertura formal de un "
+            "manual operativo corporativo a partir de evidencia textual. No inventes "
+            "informacion y no menciones IA, modelo ni transcripcion."
+        )
+        user_prompt = f"""
+Redacta la parte inicial de un manual profesional.
+
+Manual: {title}
+
+Devuelve exactamente estas secciones en Markdown:
+## Objeto
+Un parrafo especifico y claro.
+
+## Alcance
+Un parrafo que indique que cubre el procedimiento, sin agregar datos externos.
+
+Reglas:
+- No uses timestamps.
+- No escribas generalidades vacias.
+- No menciones al modelo, IA ni transcripcion.
+- Si no hay datos suficientes, omite el dato en lugar de inventarlo.
+
+Evidencia principal:
+{transcript_excerpt}
+
+Secciones generadas:
+{section_summaries[:6000]}
+""".strip()
+        return self.chat(system_prompt=system_prompt, user_prompt=user_prompt)
 
     def chat(
         self,
@@ -385,7 +470,17 @@ def build_text_blocks(
     blocks: List[TranscriptBlock] = []
     for block in time_blocks:
         if len(block.text) <= max_chars:
-            blocks.append(TranscriptBlock(len(blocks) + 1, block.start_timecode, block.end_timecode, block.text, block.segment_count))
+            blocks.append(
+                TranscriptBlock(
+                    len(blocks) + 1,
+                    block.start_seconds,
+                    block.end_seconds,
+                    block.start_timecode,
+                    block.end_timecode,
+                    block.text,
+                    block.segment_count,
+                )
+            )
             continue
 
         lines = block.text.splitlines()
@@ -398,6 +493,8 @@ def build_text_blocks(
                 blocks.append(
                     TranscriptBlock(
                         index=len(blocks) + 1,
+                        start_seconds=block.start_seconds,
+                        end_seconds=block.end_seconds,
                         start_timecode=current_start,
                         end_timecode=current_end,
                         text="\n".join(current_lines),
@@ -414,6 +511,8 @@ def build_text_blocks(
             blocks.append(
                 TranscriptBlock(
                     index=len(blocks) + 1,
+                    start_seconds=block.start_seconds,
+                    end_seconds=block.end_seconds,
                     start_timecode=current_start,
                     end_timecode=current_end,
                     text="\n".join(current_lines),
@@ -432,6 +531,8 @@ def make_block(index: int, segments: Iterable[TranscriptSegment]) -> TranscriptB
     ]
     return TranscriptBlock(
         index=index,
+        start_seconds=items[0].start_seconds,
+        end_seconds=items[-1].end_seconds,
         start_timecode=items[0].start_timecode,
         end_timecode=items[-1].end_timecode,
         text="\n".join(text_lines),
@@ -451,7 +552,7 @@ def _detect_actions(text: str, limit: int) -> List[str]:
         if not clean:
             continue
         normalized = clean.lower()
-        if any(pattern in normalized for pattern in ACTION_PATTERNS):
+        if any(normalized.startswith(pattern) for pattern in ACTION_PATTERNS):
             actions.append(clean)
         if len(actions) >= limit:
             break
@@ -459,7 +560,7 @@ def _detect_actions(text: str, limit: int) -> List[str]:
 
 
 def detect_notes(text: str) -> List[str]:
-    patterns = ("recuerda", "importante", "seguridad", "debe", "unica vez", "única vez", "solo podras", "solo podrás")
+    patterns = ("recuerda", "importante", "debe", "unica vez", "única vez", "solo podras", "solo podrás")
     notes: List[str] = []
     for sentence in split_sentences(text):
         normalized = sentence.lower()
@@ -498,9 +599,502 @@ def summarize_block_text(text: str) -> str:
     return summary
 
 
+def deduplicate_sentences(sentences: List[str]) -> List[str]:
+    seen = set()
+    result: List[str] = []
+    for sentence in sentences:
+        normalized = re.sub(r"\W+", " ", sentence.lower()).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(sentence)
+    return result
+
+
+def append_screenshots(lines: List[str], references: Optional[List[ScreenshotReference]]) -> None:
+    if not references:
+        return
+    lines.extend(["**Capturas clave**", ""])
+    for relative_path, caption in references:
+        lines.extend([f"![{caption}]({relative_path})", ""])
+
+
+def format_visual_references(references: Optional[List[ScreenshotReference]]) -> str:
+    if not references:
+        return "- No se detectaron puntos visuales especificos."
+    lines = []
+    for _relative_path, caption in references:
+        text = trim_context_text(strip_caption_prefix(caption), max_length=220)
+        if text:
+            lines.append(f"- {text}")
+    return "\n".join(lines) if lines else "- No se detectaron puntos visuales especificos."
+
+
+def insert_section_screenshots(
+    markdown: str,
+    references: Optional[List[ScreenshotReference]],
+) -> str:
+    if not references:
+        return markdown
+    lines = markdown.splitlines()
+    return "\n".join(insert_screenshots_in_lines(lines, references)).strip()
+
+
+def insert_screenshots_in_lines(
+    lines: List[str],
+    references: Optional[List[ScreenshotReference]],
+) -> List[str]:
+    if not references:
+        return lines
+
+    result = list(lines)
+    positions = find_screenshot_positions(result, references)
+    insertion_plan = list(zip(references, positions))
+    for (relative_path, caption), line_index in reversed(insertion_plan):
+        context = build_screenshot_context_line(caption, result[line_index])
+        image_block = [
+            "",
+            context,
+            "",
+            f"![{caption}]({relative_path})",
+            "",
+        ]
+        result[line_index + 1:line_index + 1] = image_block
+    return result
+
+
+def find_screenshot_positions(lines: List[str], references: List[ScreenshotReference]) -> List[int]:
+    candidate_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if is_screenshot_candidate(line)
+    ]
+    if not candidate_indexes:
+        return [max(0, min(len(lines) - 1, 1))] * len(references)
+
+    used_indexes = set()
+    positions: List[int] = []
+    for _relative_path, caption in references:
+        position = find_best_screenshot_position(caption, lines, candidate_indexes, used_indexes)
+        positions.append(position)
+        used_indexes.add(position)
+    return positions
+
+
+def is_screenshot_candidate(line: str) -> bool:
+    stripped = line.strip()
+    return (
+        bool(re.match(r"^\d+\.\s+", stripped))
+        or is_list_item_candidate(stripped)
+        or is_insertable_paragraph(stripped)
+    )
+
+
+def find_best_screenshot_position(
+    caption: str,
+    lines: List[str],
+    candidate_indexes: List[int],
+    used_indexes: set[int],
+) -> int:
+    scored = [
+        (text_similarity_score(caption, lines[index]), index)
+        for index in candidate_indexes
+    ]
+    scored.sort(key=lambda item: (-item[0], item[1]))
+
+    unused_scored = [
+        (score, index)
+        for score, index in scored
+        if index not in used_indexes
+    ]
+    if unused_scored and unused_scored[0][0] > 0:
+        return unused_scored[0][1]
+
+    available_indexes = [index for index in candidate_indexes if index not in used_indexes]
+    if available_indexes:
+        return available_indexes[min(len(used_indexes), len(available_indexes) - 1)]
+    return scored[0][1]
+
+
+def build_screenshot_context_line(caption: str, anchor_line: str) -> str:
+    caption_text = trim_context_text(strip_caption_prefix(caption))
+    anchor_text = trim_context_text(clean_reference_line(anchor_line))
+    score = text_similarity_score(caption, anchor_line)
+    if anchor_text and score >= 0.45:
+        return f"*La siguiente figura muestra el punto descrito: {ensure_sentence(anchor_text)}*"
+    if caption_text:
+        return f"*La siguiente figura documenta el punto explicado en el material: {ensure_sentence(caption_text)}*"
+    if anchor_text:
+        return f"*La siguiente figura complementa el punto descrito: {ensure_sentence(anchor_text)}*"
+    return "*La siguiente figura complementa el contenido descrito en esta seccion.*"
+
+
+def clean_reference_line(line: str) -> str:
+    cleaned = line.strip()
+    cleaned = re.sub(r"^\d+\.\s+", "", cleaned)
+    cleaned = re.sub(r"^[-*]\s+", "", cleaned)
+    cleaned = cleaned.strip()
+    if cleaned.startswith("**") and cleaned.endswith("**"):
+        cleaned = cleaned.strip("*")
+    return cleaned
+
+
+def trim_context_text(text: str, max_length: int = 180) -> str:
+    cleaned = clean_transcript_text(text).strip(" -")
+    if len(cleaned) <= max_length:
+        return cleaned
+    return cleaned[: max_length - 3].rstrip(" ,.;:") + "..."
+
+
+def ensure_sentence(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return cleaned
+    if cleaned[-1] in ".!?":
+        return cleaned
+    return cleaned + "."
+
+
+def text_similarity_score(reference: str, candidate: str) -> float:
+    reference_tokens = content_tokens(reference)
+    candidate_tokens = content_tokens(candidate)
+    if not reference_tokens or not candidate_tokens:
+        return 0.0
+
+    reference_set = set(reference_tokens)
+    candidate_set = set(candidate_tokens)
+    overlap = reference_set & candidate_set
+    sequence_bonus = consecutive_token_bonus(reference_tokens, candidate_tokens)
+    return (len(overlap) / max(1, len(reference_set))) + sequence_bonus
+
+
+def consecutive_token_bonus(reference_tokens: List[str], candidate_tokens: List[str]) -> float:
+    if not reference_tokens or not candidate_tokens:
+        return 0.0
+    candidate_pairs = set(zip(candidate_tokens, candidate_tokens[1:]))
+    if not candidate_pairs:
+        return 0.0
+    matched_pairs = sum(
+        1
+        for pair in zip(reference_tokens, reference_tokens[1:])
+        if pair in candidate_pairs
+    )
+    return min(0.4, matched_pairs * 0.08)
+
+
+def content_tokens(text: str) -> List[str]:
+    normalized = normalize_for_similarity(strip_caption_prefix(text))
+    words = re.findall(r"[a-z0-9]+", normalized)
+    return [
+        normalize_token(word)
+        for word in words
+        if len(normalize_token(word)) >= 3 and normalize_token(word) not in STOPWORDS
+    ]
+
+
+def strip_caption_prefix(text: str) -> str:
+    return re.sub(
+        r"^(?:captura de apoyo|figura|imagen de referencia)\s*(?:\([^)]+\))?\s*-\s*",
+        "",
+        text.strip(),
+        flags=re.IGNORECASE,
+    )
+
+
+def normalize_for_similarity(text: str) -> str:
+    replacements = {
+        "á": "a",
+        "é": "e",
+        "í": "i",
+        "ó": "o",
+        "ú": "u",
+        "ñ": "n",
+        "ü": "u",
+    }
+    normalized = text.lower()
+    for source, target in replacements.items():
+        normalized = normalized.replace(source, target)
+    return normalized
+
+
+def normalize_token(token: str) -> str:
+    replacements = {
+        "acceda": "ingresar",
+        "accede": "ingresar",
+        "acceder": "ingresar",
+        "actualice": "descargar",
+        "actualiza": "descargar",
+        "actualizar": "descargar",
+        "descarga": "descargar",
+        "descargue": "descargar",
+        "descargar": "descargar",
+        "ingresa": "ingresar",
+        "ingrese": "ingresar",
+        "ingresar": "ingresar",
+        "introduce": "introducir",
+        "introduzca": "introducir",
+        "introducir": "introducir",
+        "selecciona": "seleccionar",
+        "seleccione": "seleccionar",
+        "seleccionar": "seleccionar",
+        "presiona": "presionar",
+        "presione": "presionar",
+        "presionar": "presionar",
+        "pulse": "presionar",
+        "pulsar": "presionar",
+        "boton": "boton",
+        "botones": "boton",
+        "campo": "campo",
+        "campos": "campo",
+        "clave": "codigo",
+        "movil": "movil",
+        "mobile": "movil",
+        "app": "aplicacion",
+        "aplicacion": "aplicacion",
+        "aplicaciones": "aplicacion",
+        "codigo": "codigo",
+        "codigos": "codigo",
+        "correo": "correo",
+        "electronico": "electronico",
+        "toquen": "token",
+        "token": "token",
+        "vestor": "store",
+        "store": "store",
+        "general": "generar",
+    }
+    return replacements.get(token, token)
+
+
+STOPWORDS = {
+    "para",
+    "con",
+    "por",
+    "del",
+    "los",
+    "las",
+    "una",
+    "uno",
+    "este",
+    "esta",
+    "que",
+    "debe",
+    "debes",
+    "desde",
+    "donde",
+    "como",
+    "captura",
+    "apoyo",
+    "referencia",
+    "visual",
+    "paso",
+    "procedimiento",
+}
+
+
+def is_insertable_paragraph(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith("#") or stripped.startswith("!") or stripped.startswith("- "):
+        return False
+    if stripped.startswith("**") and stripped.endswith("**"):
+        return False
+    return True
+
+
+def is_list_item_candidate(line: str) -> bool:
+    stripped = line.strip()
+    if not re.match(r"^[-*]\s+\S", stripped):
+        return False
+    return len(content_tokens(stripped)) >= 3
+
+
+def distribute_indexes(indexes: List[int], count: int) -> List[int]:
+    if count <= 0:
+        return []
+    if len(indexes) >= count:
+        if count == 1:
+            return [indexes[0]]
+        last_index = len(indexes) - 1
+        return [
+            indexes[round(position * last_index / (count - 1))]
+            for position in range(count)
+        ]
+    return indexes + [indexes[-1]] * (count - len(indexes))
+
+
 def manual_title(metadata: VideoMetadata) -> str:
-    stem = Path(metadata.original_filename).stem.strip() or "capacitacion"
-    return f"Manual de capacitacion: {stem}"
+    stem = manual_subject(metadata)
+    return f"Manual operativo: {stem}"
+
+
+def build_manual_front_matter(
+    metadata: VideoMetadata,
+    *,
+    title: str,
+    generation_label: str,
+    model: Optional[str] = None,
+    generated_at: Optional[str] = None,
+) -> List[str]:
+    lines = [
+        f"# {title}",
+        "",
+        "## Datos del documento",
+        "",
+        f"- Material base: {metadata.original_filename}",
+        f"- Duracion aproximada: {format_duration(metadata.duration_seconds)}",
+        f"- Fecha de generacion: {format_datetime_lapaz(generated_at)}",
+        f"- Tipo de documento: Manual operativo",
+        f"- Metodo de generacion: {generation_label}",
+    ]
+    if model:
+        lines.append(f"- Modelo local: {model}")
+    lines.append("")
+    return lines
+
+
+def build_professional_overview(metadata: VideoMetadata) -> str:
+    process_name = manual_subject(metadata).lower()
+    return "\n".join(
+        [
+            "## Objeto",
+            "",
+            (
+                f"Documentar de forma ordenada el procedimiento explicado en el video sobre {process_name}."
+            ),
+            "",
+            "## Alcance",
+            "",
+            (
+                "El contenido cubre unicamente los pasos, opciones y consideraciones que aparecen "
+                "en el material base. No se agregan requisitos, politicas ni datos externos."
+            ),
+        ]
+    )
+
+
+def humanize_stem(stem: str) -> str:
+    text = (stem or "capacitacion").replace("_", " ")
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip(" -._")
+    return text or "capacitacion"
+
+
+def manual_subject(metadata: VideoMetadata) -> str:
+    text = humanize_stem(Path(metadata.original_filename).stem)
+    parts = re.split(r"\s+(como|cómo|para|tutorial|capacitacion|capacitación)\b", text, maxsplit=1, flags=re.IGNORECASE)
+    subject = parts[0].strip(" -:._") if parts else text
+    return subject or text
+
+
+def build_transcript_excerpt(segments: List[TranscriptSegment], max_chars: int = 9000) -> str:
+    lines = []
+    total = 0
+    for segment in segments:
+        text = clean_transcript_text(segment.text)
+        if not text:
+            continue
+        line = f"- {text}"
+        if total + len(line) > max_chars:
+            break
+        lines.append(line)
+        total += len(line)
+    return "\n".join(lines)
+
+
+def normalize_overview_markdown(text: str) -> str:
+    cleaned = normalize_basic_markdown(text, strip_timecodes=True)
+    required_headings = ("## Objeto", "## Alcance")
+    if all(heading in cleaned for heading in required_headings):
+        return cleaned
+
+    return "\n\n".join(
+        [
+            "## Objeto",
+            "Documentar el procedimiento explicado en el material base.",
+            "",
+            "## Alcance",
+            "Este manual cubre unicamente las acciones y consideraciones explicadas en el material base.",
+        ]
+    )
+
+
+def normalize_llm_section_markdown(text: str) -> str:
+    cleaned = normalize_basic_markdown(text, strip_timecodes=True)
+    lines = []
+    for raw_line in cleaned.splitlines():
+        line = raw_line.rstrip()
+        normalized = line.strip().lower()
+        if normalized.startswith("referencia de revision") or normalized.startswith("referencias de revision"):
+            continue
+        if normalized.startswith("referencia:"):
+            continue
+        if line.startswith("# "):
+            line = "### " + line[2:].strip()
+        elif line.startswith("## "):
+            line = "### " + line[3:].strip()
+        lines.append(line)
+
+    result = "\n".join(lines).strip()
+    if not result.startswith("### "):
+        result = "### Procedimiento\n\n" + result
+    return result
+
+
+def normalize_basic_markdown(text: str, *, strip_timecodes: bool) -> str:
+    cleaned = clean_markdown(text)
+    raw_lines = cleaned.splitlines()
+    lines: List[str] = []
+    index = 0
+    while index < len(raw_lines):
+        line = raw_lines[index].rstrip()
+        next_line = raw_lines[index + 1].strip() if index + 1 < len(raw_lines) else ""
+        if line.strip() and re.fullmatch(r"={3,}|-{3,}", next_line):
+            lines.append("### " + line.strip("# *"))
+            index += 2
+            continue
+        stripped = line.lstrip()
+        indent = line[: len(line) - len(stripped)]
+        if stripped.startswith("* ") or stripped.startswith("+ "):
+            line = indent + "- " + stripped[2:]
+        if strip_timecodes:
+            line = strip_inline_timecodes(line)
+        lines.append(line)
+        index += 1
+
+    cleaned = "\n".join(lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def strip_inline_timecodes(text: str) -> str:
+    text = re.sub(r"\s*\([0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,3})?(?:\s*-\s*[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,3})?)?\)", "", text)
+    text = re.sub(r"\[[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,3})?\s*-\s*[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,3})?\]\s*", "", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def format_datetime_lapaz(value: Optional[str]) -> str:
+    if not value:
+        return "No disponible"
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    lapaz = timezone(timedelta(hours=-4))
+    return parsed.astimezone(lapaz).strftime("%Y-%m-%d %H:%M:%S UTC-04:00")
+
+
+def compact_datetime_lapaz(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return re.sub(r"\W+", "", value)[:15] or "sin-fecha"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    lapaz = timezone(timedelta(hours=-4))
+    return parsed.astimezone(lapaz).strftime("%Y%m%d-%H%M%S")
 
 
 def format_duration(seconds: Optional[float]) -> str:

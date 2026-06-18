@@ -1,0 +1,81 @@
+from sqlalchemy import Column, String, Float, Integer, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
+from .database import Base
+
+class DBUser(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    is_admin = Column(Boolean, default=False)
+    created_at = Column(String, nullable=False)
+
+class DBArea(Base):
+    __tablename__ = "areas"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    created_at = Column(String, nullable=False)
+
+class DBSubArea(Base):
+    __tablename__ = "subareas"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    area_id = Column(String, ForeignKey("areas.id"), nullable=False)
+    created_at = Column(String, nullable=False)
+
+class DBVideoMetadata(Base):
+    __tablename__ = "videos"
+
+    id = Column(String, primary_key=True, index=True)
+    original_filename = Column(String, nullable=False)
+    stored_filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+    duration_seconds = Column(Float, nullable=True)
+    language = Column(String, nullable=True)
+    processing_stage = Column(String, nullable=True)
+    processing_started_at = Column(String, nullable=True)
+    processing_finished_at = Column(String, nullable=True)
+    processing_progress = Column(Float, default=0.0)
+    transcribed_seconds = Column(Float, default=0.0)
+    transcribed_timecode = Column(String, nullable=True)
+    progress_updated_at = Column(String, nullable=True)
+    audio_extraction_backend = Column(String, nullable=True)
+    audio_extraction_error = Column(String, nullable=True)
+    segment_count = Column(Integer, default=0)
+    chunk_count = Column(Integer, default=0)
+    error = Column(String, nullable=True)
+    subarea_id = Column(String, ForeignKey("subareas.id"), nullable=True)
+
+
+class DBManualMetadata(Base):
+    __tablename__ = "manuals"
+
+    id = Column(String, primary_key=True, index=True)
+    video_id = Column(String, ForeignKey("videos.id"), index=True, nullable=False)
+    mode = Column(String, nullable=False)
+    status = Column(String, nullable=False)
+    format = Column(String, default="markdown")
+    provider = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    include_timestamps = Column(Boolean, default=True)
+    include_screenshots = Column(Boolean, default=True)
+    title = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
+    processing_started_at = Column(String, nullable=True)
+    processing_finished_at = Column(String, nullable=True)
+    processing_stage = Column(String, nullable=True)
+    progress = Column(Float, default=0.0)
+    current_section = Column(String, nullable=True)
+    last_generated_text = Column(String, nullable=True)
+    section_count = Column(Integer, default=0)
+    word_count = Column(Integer, default=0)
+    screenshot_count = Column(Integer, default=0)
+    error = Column(String, nullable=True)

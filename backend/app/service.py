@@ -3,9 +3,10 @@ from __future__ import annotations
 import mimetypes
 import traceback
 import uuid
+from urllib.parse import unquote
 from pathlib import Path
 from threading import Lock
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from fastapi import UploadFile
 
@@ -14,7 +15,15 @@ from .chunking import build_search_chunks
 from .config import Settings
 from .debug import log_event
 from .manual_exports import ManualExportError, export_manual
-from .manual_generation import build_extractive_manual, build_llm_manual, count_words, manual_title
+from .manual_generation import (
+    build_extractive_manual,
+    build_llm_manual,
+    build_text_blocks,
+    build_time_blocks,
+    compact_datetime_lapaz,
+    count_words,
+    manual_title,
+)
 from .models import (
     AnswerResponse,
     ManualMetadata,
@@ -30,6 +39,7 @@ from .models import (
     VideoStatus,
 )
 from .search import TfidfSearchEngine
+from .screenshots import build_screenshot_targets, extract_manual_screenshots
 from .storage import VideoStorage, utc_now
 from .timecodes import format_timecode
 from .transcription import (
@@ -302,8 +312,9 @@ class VideoService:
             provider=provider,
             model=model,
             include_timestamps=request.include_timestamps,
+            include_screenshots=request.include_screenshots,
             title=manual_title(video),
-            filename=f"manual-{request.mode.value}-{manual_id[:8]}.md",
+            filename=f"manual-{request.mode.value}-{compact_datetime_lapaz(now)}-{manual_id[:8]}.md",
             created_at=now,
             updated_at=now,
         )
@@ -340,25 +351,82 @@ class VideoService:
             if not segments:
                 raise RuntimeError("No hay transcripcion disponible para generar el manual.")
 
+            screenshots_by_block: Dict[int, List[Tuple[str, str]]] = {}
+            if metadata.include_screenshots:
+                self.storage.update_manual_metadata(
+                    video_id,
+                    manual_id,
+                    processing_stage="extracting_screenshots",
+                    progress=8.0,
+                    current_section="Extrayendo capturas del video",
+                )
+                manual_blocks = (
+                    build_text_blocks(
+                        segments,
+                        chunk_seconds=self.settings.manual_llm_chunk_seconds,
+                        max_chars=self.settings.manual_llm_chunk_max_chars,
+                    )
+                    if metadata.mode == ManualMode.llm
+                    else build_time_blocks(segments, chunk_seconds=self.settings.manual_chunk_seconds)
+                )
+                screenshot_max_count = (
+                    self.settings.manual_llm_screenshot_max_count
+                    if metadata.mode == ManualMode.llm
+                    else self.settings.manual_screenshot_max_count
+                )
+                screenshot_targets = build_screenshot_targets(
+                    segments=segments,
+                    parent_blocks=manual_blocks,
+                    max_count=screenshot_max_count,
+                    key_points_only=metadata.mode == ManualMode.llm,
+                )
+                screenshots = extract_manual_screenshots(
+                    video_path=self.storage.source_path(video),
+                    output_dir=self.storage.manual_screenshots_dir(video_id, manual_id),
+                    blocks=screenshot_targets,
+                    ffmpeg_bin=self.settings.ffmpeg_bin,
+                    offset_seconds=self.settings.manual_screenshot_offset_seconds,
+                    width=self.settings.manual_screenshot_width,
+                    max_count=screenshot_max_count,
+                )
+                for screenshot in screenshots:
+                    screenshots_by_block.setdefault(screenshot.block_index, []).append(
+                        (screenshot.relative_path, screenshot.caption)
+                    )
+                self.storage.update_manual_metadata(
+                    video_id,
+                    manual_id,
+                    screenshot_count=sum(len(items) for items in screenshots_by_block.values()),
+                    progress=18.0,
+                    current_section=f"{sum(len(items) for items in screenshots_by_block.values())} capturas extraidas",
+                )
+                log_event(
+                    "Manual screenshots extracted "
+                    f"manual_id={manual_id} count={sum(len(items) for items in screenshots_by_block.values())}",
+                    video_id,
+                )
+
             if metadata.mode == ManualMode.extractive:
                 self.storage.update_manual_metadata(
                     video_id,
                     manual_id,
                     processing_stage="building_extractive_manual",
-                    progress=35.0,
+                    progress=35.0 if metadata.include_screenshots else 20.0,
                 )
                 result = build_extractive_manual(
                     video,
                     segments,
                     chunk_seconds=self.settings.manual_chunk_seconds,
                     include_timestamps=metadata.include_timestamps,
+                    generated_at=metadata.created_at,
+                    screenshots_by_block=screenshots_by_block,
                 )
             elif metadata.mode == ManualMode.llm:
                 self.storage.update_manual_metadata(
                     video_id,
                     manual_id,
                     processing_stage="generating_with_llm",
-                    progress=5.0,
+                    progress=20.0 if metadata.include_screenshots else 5.0,
                 )
                 progress_state = {"last_saved_length": 0}
 
@@ -367,9 +435,11 @@ class VideoService:
                     if delta and content_length - progress_state["last_saved_length"] < 160:
                         return
                     progress_state["last_saved_length"] = content_length
-                    progress = 5.0
+                    base_progress = 20.0 if metadata.include_screenshots else 5.0
+                    progress = base_progress
                     if total_blocks > 0 and block_index > 0:
-                        progress = min(98.0, round(((block_index - 0.35) / total_blocks) * 100, 2))
+                        ratio = min(1.0, max(0.0, (block_index - 0.35) / total_blocks))
+                        progress = min(98.0, round(base_progress + (ratio * (98.0 - base_progress)), 2))
                     self.storage.save_manual_content(video_id, manual_id, content)
                     self.storage.update_manual_metadata(
                         video_id,
@@ -392,6 +462,8 @@ class VideoService:
                     provider=metadata.provider or self.settings.llm_provider,
                     model=metadata.model or self.settings.llm_model,
                     include_timestamps=metadata.include_timestamps,
+                    generated_at=metadata.created_at,
+                    screenshots_by_block=screenshots_by_block,
                     on_progress=save_llm_progress,
                 )
             else:
@@ -409,6 +481,7 @@ class VideoService:
                 last_generated_text=None,
                 section_count=result.section_count,
                 word_count=result.word_count,
+                screenshot_count=sum(len(items) for items in screenshots_by_block.values()),
                 error=None,
             )
             log_event(
@@ -450,7 +523,12 @@ class VideoService:
         content = self.storage.load_manual_content(video_id, manual_id)
         export_path = self.storage.manual_export_path(video_id, manual_id, output_format)
         try:
-            path = export_manual(content, export_path, output_format)
+            path = export_manual(
+                content,
+                export_path,
+                output_format,
+                assets_dir=self.storage.manual_assets_dir(video_id, manual_id),
+            )
         except ManualExportError:
             raise
         suffix = "md" if output_format == "markdown" else output_format
@@ -461,6 +539,26 @@ class VideoService:
         }
         filename = f"{Path(metadata.filename).stem}.{suffix}"
         return path, filename, media_types.get(output_format, "application/octet-stream")
+
+    def get_manual_asset(self, video_id: str, manual_id: str, asset_path: str) -> Tuple[Path, str, str]:
+        self.storage.load_manual_metadata(video_id, manual_id)
+        normalized = unquote(asset_path).replace("\\", "/").strip("/")
+        parts = [part for part in normalized.split("/") if part]
+        if not parts or any(part in {".", ".."} for part in parts):
+            raise FileNotFoundError(asset_path)
+
+        root = self.storage.manual_assets_dir(video_id, manual_id).resolve()
+        path = (root / Path(*parts)).resolve()
+        if root not in path.parents and path != root:
+            raise FileNotFoundError(asset_path)
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(asset_path)
+
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return path, media_type, path.name
+
+    def delete_manual(self, video_id: str, manual_id: str) -> None:
+        self.storage.delete_manual(video_id, manual_id)
 
     def query_video(
         self,

@@ -47,6 +47,11 @@ class VideoMetadata(BaseModel):
     segment_count: int = 0
     chunk_count: int = 0
     error: Optional[str] = None
+    subarea_id: Optional[str] = None
+
+class VideoUpdate(BaseModel):
+    original_filename: Optional[str] = None
+    subarea_id: Optional[str] = None
 
 
 class TranscriptSegment(BaseModel):
@@ -106,6 +111,7 @@ class ManualRequest(BaseModel):
     provider: Optional[str] = Field(None, description="Proveedor local del LLM")
     model: Optional[str] = Field(None, description="Modelo local para modo llm")
     include_timestamps: bool = True
+    include_screenshots: bool = True
 
 
 class ManualMetadata(BaseModel):
@@ -117,6 +123,7 @@ class ManualMetadata(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     include_timestamps: bool = True
+    include_screenshots: bool = True
     title: str
     filename: str
     created_at: str
@@ -129,6 +136,7 @@ class ManualMetadata(BaseModel):
     last_generated_text: Optional[str] = None
     section_count: int = 0
     word_count: int = 0
+    screenshot_count: int = 0
     error: Optional[str] = None
 
 

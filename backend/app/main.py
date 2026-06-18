@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Response, UploadFile, status
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Response, UploadFile, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -21,12 +21,17 @@ from .models import (
     SystemDependenciesResponse,
     TranscriptResponse,
     VideoMetadata,
+    VideoUpdate,
 )
 from .search import TfidfSearchEngine
 from .service import VideoService
 from .storage import VideoStorage
 from .transcription import FasterWhisperTranscriber
+from .database import Base, engine
 
+from .auth import get_current_user
+from .db_models import DBUser
+from .routers import auth, areas
 
 app = FastAPI(
     title=settings.app_name,
@@ -44,6 +49,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
+app.include_router(areas.router)
+
 storage = VideoStorage(settings)
 transcriber = FasterWhisperTranscriber(settings)
 search_engine = TfidfSearchEngine()
@@ -52,6 +60,32 @@ service = VideoService(settings, storage, transcriber, search_engine)
 
 @app.on_event("startup")
 def recover_interrupted_processing() -> None:
+    Base.metadata.create_all(bind=engine)
+    
+    # Create default admin user if not exists
+    from sqlalchemy.orm import Session
+    from .database import SessionLocal
+    from .db_models import DBUser
+    from .auth import get_password_hash
+    import uuid
+    import datetime
+    
+    db = SessionLocal()
+    try:
+        admin_exists = db.query(DBUser).filter(DBUser.email == "admin@bmsc.com.bo").first()
+        if not admin_exists:
+            hashed_pw = get_password_hash("admin123")
+            db.add(DBUser(
+                id=str(uuid.uuid4()),
+                email="admin@bmsc.com.bo",
+                hashed_password=hashed_pw,
+                is_admin=True,
+                created_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
+            ))
+            db.commit()
+    finally:
+        db.close()
+
     log_event(
         "Backend startup "
         f"storage_dir={settings.storage_dir} "
@@ -69,7 +103,7 @@ def health() -> HealthResponse:
 
 
 @app.get("/system/dependencies", response_model=SystemDependenciesResponse)
-def system_dependencies() -> SystemDependenciesResponse:
+def system_dependencies(current_user: DBUser = Depends(get_current_user)) -> SystemDependenciesResponse:
     return service.get_system_dependencies()
 
 
@@ -77,6 +111,7 @@ def system_dependencies() -> SystemDependenciesResponse:
 async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    current_user: DBUser = Depends(get_current_user)
 ) -> VideoMetadata:
     try:
         metadata = await service.create_video(file)
@@ -88,20 +123,47 @@ async def upload_video(
 
 
 @app.get("/videos", response_model=List[VideoMetadata])
-def list_videos() -> List[VideoMetadata]:
+def list_videos(current_user: DBUser = Depends(get_current_user)) -> List[VideoMetadata]:
     return service.list_videos()
 
 
 @app.get("/videos/{video_id}", response_model=VideoMetadata)
-def get_video(video_id: str) -> VideoMetadata:
+def get_video(video_id: str, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
     try:
         return service.get_video(video_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc
 
 
+@app.put("/videos/{video_id}", response_model=VideoMetadata)
+def update_video(video_id: str, request: VideoUpdate, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
+    from sqlalchemy.orm import Session
+    from .database import SessionLocal
+    from .db_models import DBVideoMetadata
+    
+    db = SessionLocal()
+    try:
+        db_video = db.query(DBVideoMetadata).filter(DBVideoMetadata.id == video_id).first()
+        if not db_video:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado")
+            
+        if request.original_filename is not None:
+            db_video.original_filename = request.original_filename
+        if request.subarea_id is not None:
+            # We allow empty string or null to unassign subarea
+            if request.subarea_id == "":
+                db_video.subarea_id = None
+            else:
+                db_video.subarea_id = request.subarea_id
+                
+        db.commit()
+        return service.get_video(video_id)
+    finally:
+        db.close()
+
+
 @app.post("/videos/{video_id}/process", response_model=VideoMetadata)
-def reprocess_video(video_id: str, background_tasks: BackgroundTasks) -> VideoMetadata:
+def reprocess_video(video_id: str, background_tasks: BackgroundTasks, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
     try:
         metadata = service.get_video(video_id)
     except FileNotFoundError as exc:
@@ -112,7 +174,7 @@ def reprocess_video(video_id: str, background_tasks: BackgroundTasks) -> VideoMe
 
 
 @app.post("/videos/{video_id}/index", response_model=VideoMetadata)
-def reindex_video(video_id: str) -> VideoMetadata:
+def reindex_video(video_id: str, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
     try:
         return service.reindex_video(video_id)
     except FileNotFoundError as exc:
@@ -122,7 +184,7 @@ def reindex_video(video_id: str) -> VideoMetadata:
 
 
 @app.get("/videos/{video_id}/transcript", response_model=TranscriptResponse)
-def get_transcript(video_id: str) -> TranscriptResponse:
+def get_transcript(video_id: str, current_user: DBUser = Depends(get_current_user)) -> TranscriptResponse:
     try:
         return service.get_transcript(video_id)
     except FileNotFoundError as exc:
@@ -151,6 +213,7 @@ def create_manual(
     video_id: str,
     request: ManualRequest,
     background_tasks: BackgroundTasks,
+    current_user: DBUser = Depends(get_current_user)
 ) -> ManualMetadata:
     try:
         metadata = service.create_manual(video_id, request)
@@ -166,7 +229,7 @@ def create_manual(
 
 
 @app.get("/videos/{video_id}/manuals", response_model=List[ManualMetadata])
-def list_manuals(video_id: str) -> List[ManualMetadata]:
+def list_manuals(video_id: str, current_user: DBUser = Depends(get_current_user)) -> List[ManualMetadata]:
     try:
         return service.list_manuals(video_id)
     except FileNotFoundError as exc:
@@ -174,7 +237,7 @@ def list_manuals(video_id: str) -> List[ManualMetadata]:
 
 
 @app.get("/videos/{video_id}/manuals/{manual_id}", response_model=ManualResponse)
-def get_manual(video_id: str, manual_id: str, include_content: bool = False) -> ManualResponse:
+def get_manual(video_id: str, manual_id: str, include_content: bool = False, current_user: DBUser = Depends(get_current_user)) -> ManualResponse:
     try:
         return service.get_manual(video_id, manual_id, include_content=include_content)
     except FileNotFoundError as exc:
@@ -200,8 +263,36 @@ def download_manual(video_id: str, manual_id: str, format: str = "markdown") -> 
     )
 
 
+@app.get("/videos/{video_id}/manuals/{manual_id}/assets/{asset_path:path}", response_class=FileResponse)
+def get_manual_asset(video_id: str, manual_id: str, asset_path: str) -> FileResponse:
+    try:
+        path, media_type, filename = service.get_manual_asset(video_id, manual_id, asset_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset no encontrado") from exc
+
+    return FileResponse(
+        path=path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="inline",
+    )
+
+
+@app.delete(
+    "/videos/{video_id}/manuals/{manual_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_manual(video_id: str, manual_id: str, current_user: DBUser = Depends(get_current_user)) -> Response:
+    try:
+        service.delete_manual(video_id, manual_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manual no encontrado") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.post("/videos/{video_id}/query", response_model=QueryResponse)
-def query_video(video_id: str, request: QueryRequest) -> QueryResponse:
+def query_video(video_id: str, request: QueryRequest, current_user: DBUser = Depends(get_current_user)) -> QueryResponse:
     try:
         return service.query_video(
             video_id=video_id,
@@ -216,7 +307,7 @@ def query_video(video_id: str, request: QueryRequest) -> QueryResponse:
 
 
 @app.post("/videos/{video_id}/ask", response_model=AnswerResponse)
-def ask_video(video_id: str, request: AnswerRequest) -> AnswerResponse:
+def ask_video(video_id: str, request: AnswerRequest, current_user: DBUser = Depends(get_current_user)) -> AnswerResponse:
     try:
         return service.answer_video(
             video_id=video_id,
@@ -235,7 +326,7 @@ def ask_video(video_id: str, request: AnswerRequest) -> AnswerResponse:
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-def delete_video(video_id: str) -> Response:
+def delete_video(video_id: str, current_user: DBUser = Depends(get_current_user)) -> Response:
     try:
         service.delete_video(video_id)
     except FileNotFoundError as exc:
