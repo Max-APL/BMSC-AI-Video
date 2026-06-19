@@ -5,7 +5,7 @@ from typing import List, Optional
 import uuid
 import datetime
 
-from ..auth import get_db, get_current_user
+from ..auth import get_db, get_current_user, require_permission
 from ..db_models import DBArea, DBSubArea, DBUser, DBVideoMetadata
 
 router = APIRouter(prefix="/areas", tags=["areas"])
@@ -28,9 +28,17 @@ class SubAreaCreate(BaseModel):
 
 @router.get("", response_model=List[AreaResponse])
 def get_areas(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    from ..db_models import DBRole
+    import json
+    role = db.query(DBRole).filter(DBRole.id == current_user.role_id).first()
+    allowed_areas = json.loads(role.allowed_areas) if role and role.allowed_areas else []
+    
     areas = db.query(DBArea).all()
     result = []
     for area in areas:
+        if "*" not in allowed_areas and area.id not in allowed_areas:
+            continue
+            
         subareas = db.query(DBSubArea).filter(DBSubArea.area_id == area.id).all()
         result.append({
             "id": area.id,
@@ -40,7 +48,7 @@ def get_areas(db: Session = Depends(get_db), current_user: DBUser = Depends(get_
     return result
 
 @router.post("", response_model=AreaResponse)
-def create_area(area: AreaCreate, db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+def create_area(area: AreaCreate, db: Session = Depends(get_db), current_user: DBUser = Depends(require_permission("manage_organization"))):
     new_id = str(uuid.uuid4())
     db_area = DBArea(
         id=new_id,
@@ -52,7 +60,7 @@ def create_area(area: AreaCreate, db: Session = Depends(get_db), current_user: D
     return {"id": new_id, "name": area.name, "subareas": []}
 
 @router.post("/{area_id}/subareas", response_model=SubAreaResponse)
-def create_subarea(area_id: str, subarea: SubAreaCreate, db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+def create_subarea(area_id: str, subarea: SubAreaCreate, db: Session = Depends(get_db), current_user: DBUser = Depends(require_permission("manage_organization"))):
     area = db.query(DBArea).filter(DBArea.id == area_id).first()
     if not area:
         raise HTTPException(status_code=404, detail="Área no encontrada")

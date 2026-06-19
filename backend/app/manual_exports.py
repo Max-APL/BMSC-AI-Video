@@ -103,7 +103,7 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
             fontName="Helvetica-Bold",
             fontSize=18,
             leading=22,
-            textColor=colors.HexColor("#12395f"),
+            textColor=colors.HexColor("#004d33"),
             spaceAfter=18,
         )
     )
@@ -114,7 +114,7 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
             fontName="Helvetica",
             fontSize=9,
             leading=12,
-            textColor=colors.HexColor("#60748c"),
+            textColor=colors.HexColor("#4b6858"),
             spaceAfter=5,
         )
     )
@@ -125,7 +125,7 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
             fontName="Helvetica-Bold",
             fontSize=13,
             leading=16,
-            textColor=colors.HexColor("#12395f"),
+            textColor=colors.HexColor("#004d33"),
             spaceBefore=12,
             spaceAfter=8,
         )
@@ -137,7 +137,7 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
             fontName="Helvetica-Bold",
             fontSize=11.5,
             leading=14,
-            textColor=colors.HexColor("#1f6ed4"),
+            textColor=colors.HexColor("#008a54"),
             spaceBefore=8,
             spaceAfter=6,
         )
@@ -149,9 +149,33 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
             fontName="Helvetica-Bold",
             fontSize=10.5,
             leading=13,
-            textColor=colors.HexColor("#263b52"),
+            textColor=colors.HexColor("#143122"),
             spaceBefore=6,
             spaceAfter=4,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="ManualHeading5",
+            parent=styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=12,
+            textColor=colors.HexColor("#2a4233"),
+            spaceBefore=4,
+            spaceAfter=2,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="ManualHeading6",
+            parent=styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=9.5,
+            leading=11,
+            textColor=colors.HexColor("#3f5748"),
+            spaceBefore=4,
+            spaceAfter=2,
         )
     )
     body_style = ParagraphStyle(
@@ -182,7 +206,7 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
         fontName="Helvetica-Oblique",
         fontSize=8.5,
         leading=11,
-        textColor=colors.HexColor("#60748c"),
+        textColor=colors.HexColor("#4b6858"),
         alignment=1,
         spaceAfter=10,
     )
@@ -195,7 +219,7 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
         if kind == "h1":
             number_index = 1
             story.append(Paragraph(inline_markdown(text), styles["ManualTitle"]))
-            story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#dbe5f0"), spaceAfter=14))
+            story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#d1e6db"), spaceAfter=14))
             seen_title = True
         elif kind == "h2":
             number_index = 1
@@ -204,7 +228,7 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
             else:
                 story.append(Spacer(1, 4))
                 story.append(Paragraph(inline_markdown(text), styles["ManualHeading2"]))
-                story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#e3ebf4"), spaceAfter=6))
+                story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#e0ede6"), spaceAfter=6))
             seen_title = True
         elif kind == "h3":
             number_index = 1
@@ -212,6 +236,12 @@ def export_pdf(content: str, output_path: Path, *, assets_dir: Optional[Path] = 
         elif kind == "h4":
             number_index = 1
             story.append(Paragraph(inline_markdown(text), styles["ManualHeading4"]))
+        elif kind == "h5":
+            number_index = 1
+            story.append(Paragraph(inline_markdown(text), styles["ManualHeading5"]))
+        elif kind == "h6":
+            number_index = 1
+            story.append(Paragraph(inline_markdown(text), styles["ManualHeading6"]))
         elif kind == "bullet":
             story.append(Paragraph("&bull;&nbsp;" + inline_markdown(text), bullet_style))
         elif kind == "number":
@@ -285,6 +315,12 @@ def parse_markdown_blocks(content: str) -> List[Tuple[str, str]]:
         elif line.startswith("#### "):
             flush_paragraph()
             blocks.append(("h4", line[5:].strip()))
+        elif line.startswith("##### "):
+            flush_paragraph()
+            blocks.append(("h5", line[6:].strip()))
+        elif line.startswith("###### "):
+            flush_paragraph()
+            blocks.append(("h6", line[7:].strip()))
         elif line.startswith("- ") or line.startswith("* ") or line.startswith("+ "):
             flush_paragraph()
             blocks.append(("bullet", line[2:].strip()))
@@ -357,12 +393,17 @@ def resolve_image_payload(payload: str, assets_dir: Optional[Path]) -> Tuple[Opt
 
 def inline_markdown(text: str) -> str:
     escaped = html.escape(text)
-    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+    escaped = re.sub(r"__(.+?)__", r"<b>\1</b>", escaped)
+    escaped = re.sub(r"\*(.+?)\*", r"<i>\1</i>", escaped)
+    escaped = re.sub(r"_(.+?)_", r"<i>\1</i>", escaped)
+    escaped = re.sub(r"`(.+?)`", r'<font name="Courier">\1</font>', escaped)
+    return escaped
 
 
 def draw_footer(canvas, document) -> None:
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
-    canvas.setFillColorRGB(0.38, 0.45, 0.55)
+    canvas.setFillColorRGB(0.29, 0.41, 0.35)
     canvas.drawRightString(document.pagesize[0] - document.rightMargin, 0.45 * 72, f"Pagina {document.page}")
     canvas.restoreState()

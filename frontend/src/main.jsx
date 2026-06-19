@@ -9,8 +9,10 @@ import {
   Clock3,
   Database,
   Download,
+  Edit2,
   FileText,
   FileVideo,
+  FolderOpen,
   Gauge,
   Loader2,
   MessageSquareText,
@@ -21,6 +23,10 @@ import {
   ShieldCheck,
   Trash2,
   UploadCloud,
+  Users,
+  Shield,
+  X,
+  Plus
 } from "lucide-react";
 import bmscLogo from "./assets/bmsc-logo.png";
 import "./styles.css";
@@ -355,6 +361,7 @@ function Login({ onLogin }) {
 
 function App() {
   const [token, setToken] = React.useState(localStorage.getItem("bmsc_token") || "");
+  const [currentUser, setCurrentUser] = React.useState(null);
 
   const [videos, setVideos] = React.useState([]);
   const [selectedId, setSelectedId] = React.useState(null);
@@ -363,6 +370,16 @@ function App() {
   const [answer, setAnswer] = React.useState(null);
   const [activeTab, setActiveTab] = React.useState("assistant");
   const [activeView, setActiveView] = React.useState("dashboard");
+  const [isRoleModalOpen, setIsRoleModalOpen] = React.useState(false);
+  const [editingRoleId, setEditingRoleId] = React.useState(null);
+  
+  const closeRoleModal = () => {
+    setIsRoleModalOpen(false);
+    setEditingRoleId(null);
+    setNewRoleName("");
+    setNewRolePerms([]);
+    setNewRoleAreas(["*"]);
+  };
   const [quickSearch, setQuickSearch] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
@@ -381,7 +398,31 @@ function App() {
   const [uploadSubareaId, setUploadSubareaId] = React.useState("");
   const [newAreaName, setNewAreaName] = React.useState("");
   const [newSubareaNames, setNewSubareaNames] = React.useState({});
-
+  
+  const [roles, setRoles] = React.useState([]);
+  const [usersList, setUsersList] = React.useState([]);
+  
+  const [newRoleName, setNewRoleName] = React.useState("");
+  const [newRolePerms, setNewRolePerms] = React.useState([]);
+  const [newRoleAreas, setNewRoleAreas] = React.useState(["*"]);
+  const [newUserEmail, setNewUserEmail] = React.useState("");
+  const [newUserPass, setNewUserPass] = React.useState("");
+  const [newUserRole, setNewUserRole] = React.useState("");
+  
+  const availablePermissions = [
+    { id: "view_dashboard", label: "Ver Dashboard" },
+    { id: "view_videos", label: "Ver Gestión de Videos" },
+    { id: "view_library", label: "Ver Biblioteca" },
+    { id: "view_organization", label: "Ver Organización" },
+    { id: "view_users", label: "Ver Usuarios" },
+    { id: "view_roles", label: "Ver Roles" },
+    { id: "upload_video", label: "Subir Videos" },
+    { id: "generate_manual", label: "Generar Manuales" },
+    { id: "manage_organization", label: "Gestionar Áreas" },
+    { id: "manage_users", label: "Gestionar Usuarios" },
+    { id: "manage_roles", label: "Gestionar Roles" }
+  ];
+  
   const [editingVideo, setEditingVideo] = React.useState(null);
   const [editFilename, setEditFilename] = React.useState("");
   const [editSubarea, setEditSubarea] = React.useState("");
@@ -389,6 +430,8 @@ function App() {
   const [videoToDelete, setVideoToDelete] = React.useState(null);
   const [selectedOrgArea, setSelectedOrgArea] = React.useState(null);
   const [selectedOrgSubarea, setSelectedOrgSubarea] = React.useState(null);
+  const [libraryFilterArea, setLibraryFilterArea] = React.useState(null);
+  const [libraryFilterSubarea, setLibraryFilterSubarea] = React.useState(null);
 
   const selectedVideo = videos.find((video) => video.id === selectedId) || null;
   const mediaUrl = selectedVideo ? `${API_BASE_URL}/videos/${selectedVideo.id}/media` : "";
@@ -433,12 +476,51 @@ function App() {
     }
   }, []);
 
+  const loadCurrentUser = React.useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        if (res.status === 401) {
+            setToken("");
+            localStorage.removeItem("bmsc_token");
+        }
+        throw new Error("Error fetching user info");
+      }
+      const data = await res.json();
+      setCurrentUser(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [token]);
+
+  const loadRoles = React.useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await apiRequest("/roles");
+      setRoles(data);
+    } catch (err) {}
+  }, [token]);
+
+  const loadUsersList = React.useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await apiRequest("/users");
+      setUsersList(data);
+    } catch (err) {}
+  }, [token]);
+
   React.useEffect(() => {
     if (token) {
+      loadCurrentUser();
       loadVideos();
       loadAreas();
+      loadRoles();
+      loadUsersList();
     }
-  }, [loadVideos, loadAreas, token]);
+  }, [loadCurrentUser, loadVideos, loadAreas, loadRoles, loadUsersList, token]);
 
   React.useEffect(() => {
     const interval = window.setInterval(() => loadVideos({ silent: true }), 4000);
@@ -702,6 +784,12 @@ function App() {
   );
   const latestManual = manuals[0] || null;
   const selectedVideoIsReady = selectedVideo?.status === "ready";
+
+  const hasPermission = React.useCallback((perm) => {
+    if (!currentUser || !currentUser.permissions) return false;
+    return currentUser.permissions.includes(perm);
+  }, [currentUser]);
+
   const viewTitles = {
     dashboard: {
       eyebrow: "Panel principal",
@@ -718,6 +806,21 @@ function App() {
       title: "Repositorio audiovisual",
       description: "Explora todos los videos disponibles y abre la gestión individual de cada material.",
     },
+    organization: {
+      eyebrow: "Configuración",
+      title: "Organización",
+      description: "Gestiona la estructura de áreas y subáreas de la institución.",
+    },
+    users: {
+      eyebrow: "Administración",
+      title: "Usuarios",
+      description: "Gestión de cuentas y accesos.",
+    },
+    roles: {
+      eyebrow: "Seguridad",
+      title: "Roles y Permisos",
+      description: "Definición de permisos granulares.",
+    },
     video: {
       eyebrow: "Expediente del video",
       title: selectedVideo?.original_filename || "Video seleccionado",
@@ -726,10 +829,12 @@ function App() {
   };
   const currentView = viewTitles[activeView] || viewTitles.dashboard;
   const navigationItems = [
-    { id: "dashboard", label: "Panel principal", icon: Gauge },
-    { id: "upload", label: "Gestión de videos", icon: UploadCloud },
-    { id: "library", label: "Biblioteca", icon: FileVideo, badge: videos.length },
-    { id: "organization", label: "Organización", icon: Database },
+    ...(hasPermission("view_dashboard") ? [{ id: "dashboard", label: "Panel principal", icon: Gauge }] : []),
+    ...(hasPermission("view_videos") ? [{ id: "upload", label: "Gestión de videos", icon: UploadCloud }] : []),
+    ...(hasPermission("view_library") ? [{ id: "library", label: "Biblioteca", icon: FileVideo, badge: videos.length }] : []),
+    ...(hasPermission("view_organization") ? [{ id: "organization", label: "Organización", icon: Database }] : []),
+    ...(hasPermission("view_users") ? [{ id: "users", label: "Usuarios", icon: Users }] : []),
+    ...(hasPermission("view_roles") ? [{ id: "roles", label: "Roles", icon: Shield }] : [])
   ];
 
   function openView(viewId) {
@@ -878,6 +983,37 @@ function App() {
             </button>
           ))}
         </div>
+
+        <div className="user-profile" style={{
+          marginTop: 'auto',
+          padding: '16px',
+          borderTop: '1px solid var(--line)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary-color)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', flexShrink: 0 }}>
+              {currentUser?.email?.charAt(0).toUpperCase() || "U"}
+            </div>
+            <div style={{ overflow: 'hidden' }}>
+              <div style={{ fontSize: '13px', fontWeight: 'bold', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={currentUser?.email}>{currentUser?.email}</div>
+              <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{currentUser?.role}</div>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            className="secondary-button compact" 
+            style={{ width: '100%', justifyContent: 'center' }}
+            onClick={() => {
+              localStorage.removeItem("bmsc_token");
+              setToken("");
+              setCurrentUser(null);
+            }}
+          >
+            Cerrar sesión
+          </button>
+        </div>
       </aside>
 
       <main className="main-panel">
@@ -995,35 +1131,47 @@ function App() {
 
             {activeView === "upload" && (
               <section className="upload-page">
-                <div className="upload-hero">
-                  <div>
-                    <span className="eyebrow">Nuevo material</span>
-                    <h2>Cargar video de capacitación</h2>
-                    <p>El archivo quedará en el historial y luego podrá gestionarse desde su expediente individual.</p>
-                  </div>
-                  <button className="primary-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                    <UploadCloud size={18} />
-                    {uploading ? "Subiendo..." : "Seleccionar archivo"}
-                  </button>
-                </div>
+                {hasPermission("upload_video") ? (
+                  <>
+                    <div className="upload-hero">
+                      <div>
+                        <span className="eyebrow">Nuevo material</span>
+                        <h2>Cargar video de capacitación</h2>
+                        <p>El archivo quedará en el historial y luego podrá gestionarse desde su expediente individual.</p>
+                      </div>
+                      <button className="primary-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                        <UploadCloud size={18} />
+                        {uploading ? "Subiendo..." : "Seleccionar archivo"}
+                      </button>
+                    </div>
 
-                <div style={{ padding: "0 22px", marginTop: "-10px", marginBottom: "10px" }}>
-                  <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold", color: "var(--ink-700)" }}>Asignar a subárea (Opcional):</label>
-                  <select 
-                    value={uploadSubareaId} 
-                    onChange={e => setUploadSubareaId(e.target.value)}
-                    style={{ padding: "8px", borderRadius: "6px", border: "1px solid var(--line)", width: "100%", maxWidth: "300px" }}
-                  >
-                    <option value="">Sin asignar</option>
-                    {areas.map(area => (
-                      <optgroup key={area.id} label={area.name}>
-                        {area.subareas.map(sub => (
-                          <option key={sub.id} value={sub.id}>{sub.name}</option>
+                    <div style={{ padding: "0 22px", marginTop: "-10px", marginBottom: "10px" }}>
+                      <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold", color: "var(--ink-700)" }}>Asignar a subárea (Opcional):</label>
+                      <select 
+                        value={uploadSubareaId} 
+                        onChange={e => setUploadSubareaId(e.target.value)}
+                        style={{ padding: "8px", borderRadius: "6px", border: "1px solid var(--line)", width: "100%", maxWidth: "300px" }}
+                      >
+                        <option value="">Sin asignar</option>
+                        {areas.map(area => (
+                          <optgroup key={area.id} label={area.name}>
+                            {area.subareas.map(sub => (
+                              <option key={sub.id} value={sub.id}>{sub.name}</option>
+                            ))}
+                          </optgroup>
                         ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
+                      </select>
+                    </div>
+                  </>
+                ) : (
+                  <div className="upload-hero" style={{ justifyContent: "center", textAlign: "center" }}>
+                    <div>
+                      <span className="eyebrow">Acceso Restringido</span>
+                      <h2>No tienes permisos para subir videos</h2>
+                      <p>Contacta a un administrador si crees que esto es un error.</p>
+                    </div>
+                  </div>
+                )}
 
                 <section className="library-surface">
                   <div className="library-header">
@@ -1099,47 +1247,114 @@ function App() {
               </section>
             )}
             {activeView === "library" && (
-              <section className="library-surface">
-                <div className="library-header">
-                  <div>
-                    <span className="eyebrow">Gestión de archivos</span>
-                    <h2>Biblioteca de capacitaciones</h2>
-                    <p>Administra los materiales disponibles para consulta, documentación y revisión operativa.</p>
+              <section className="library-surface" style={{ display: "flex", gap: "24px", padding: "24px", minHeight: "calc(100vh - 40px)" }}>
+                <div style={{ flex: "0 0 300px", borderRight: "1px solid var(--line)", paddingRight: "24px", overflowY: "auto" }}>
+                  <div className="library-header" style={{ marginBottom: "24px" }}>
+                    <div>
+                      <span className="eyebrow">Navegación</span>
+                      <h2>Filtros</h2>
+                    </div>
                   </div>
-                  <div className="library-mini-stats" aria-label="Resumen de biblioteca">
-                    <span><strong>{videos.length}</strong> Total</span>
-                    <span><strong>{readyCount}</strong> Listos</span>
-                    <span><strong>{processingCount}</strong> En proceso</span>
-                    <span><strong>{failedCount}</strong> Error</span>
+                  
+                  <div className="org-grid" style={{ gridTemplateColumns: "1fr" }}>
+                    <div className="area-card" style={{ marginBottom: "16px", cursor: "pointer", borderColor: !libraryFilterArea ? "var(--green-600)" : "var(--line)" }} onClick={() => { setLibraryFilterArea(null); setLibraryFilterSubarea(null); }}>
+                      <h3>Todos los videos</h3>
+                    </div>
+
+                    {areas.map(area => (
+                      <div className="area-card" key={area.id} style={{ marginBottom: "16px", cursor: "pointer", borderColor: libraryFilterArea?.id === area.id ? "var(--green-600)" : "var(--line)" }} onClick={() => { setLibraryFilterArea(area); setLibraryFilterSubarea(null); }}>
+                        <h3>{area.name} <span>({area.subareas.length})</span></h3>
+                        <div className="subarea-list">
+                          {area.subareas.map(sub => (
+                            <div 
+                              className="subarea-item" 
+                              key={sub.id} 
+                              onClick={(e) => { e.stopPropagation(); setLibraryFilterArea(area); setLibraryFilterSubarea(sub); }}
+                              style={{ 
+                                background: libraryFilterSubarea?.id === sub.id ? "var(--green-100)" : "var(--surface-soft)",
+                                color: libraryFilterSubarea?.id === sub.id ? "var(--green-900)" : "inherit",
+                                fontWeight: libraryFilterSubarea?.id === sub.id ? "bold" : "normal"
+                              }}
+                            >
+                              {sub.name}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                <div className="library-grid">
-                  {videos.length === 0 ? (
-                    <EmptyState
-                      icon={FileVideo}
-                      title="Sin videos registrados"
-                      body="Carga el primer material de capacitación para iniciar el flujo administrativo."
-                    />
-                  ) : (
-                    videos.map((video) => (
-                      <article key={video.id} className={cx("library-card", selectedId === video.id && "active")}>
-                        <div className="library-card-top">
-                          <div className="library-card-icon">
-                            <FileVideo size={20} />
+                <div style={{ flex: 1, paddingLeft: "12px", overflowY: "auto" }}>
+                  <div className="library-header" style={{ marginBottom: "24px" }}>
+                    <div>
+                      <span className="eyebrow">{libraryFilterArea ? libraryFilterArea.name : "Gestión de archivos"}</span>
+                      <h2>{libraryFilterSubarea ? libraryFilterSubarea.name : (libraryFilterArea ? "Todos los videos del área" : "Biblioteca de capacitaciones")}</h2>
+                      <p>Administra los materiales disponibles para consulta, documentación y revisión operativa.</p>
+                    </div>
+                    <div className="library-mini-stats" aria-label="Resumen de biblioteca">
+                      <span><strong>{videos.filter(v => {
+                        if (libraryFilterSubarea) return v.subarea_id === libraryFilterSubarea.id;
+                        if (libraryFilterArea) {
+                          const subIds = libraryFilterArea.subareas.map(s => s.id);
+                          return subIds.includes(v.subarea_id);
+                        }
+                        return true;
+                      }).length}</strong> Total</span>
+                    </div>
+                  </div>
+
+                  <div className="library-grid">
+                    {videos
+                      .filter(v => {
+                        if (libraryFilterSubarea) return v.subarea_id === libraryFilterSubarea.id;
+                        if (libraryFilterArea) {
+                          const subIds = libraryFilterArea.subareas.map(s => s.id);
+                          return subIds.includes(v.subarea_id);
+                        }
+                        return true;
+                      })
+                      .map((video) => (
+                      <article key={video.id} className={cx("library-card", selectedId === video.id && "active")} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, gap: 0 }}>
+                        <div style={{ backgroundColor: 'var(--surface-soft)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid var(--line)', position: 'relative' }}>
+                          <div style={{ background: 'white', padding: '12px', borderRadius: '50%', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+                            <PlayCircle size={32} color="var(--green-600)" />
                           </div>
-                          <StatusPill status={video.status} stage={video.processing_stage} />
+                          <div style={{ position: 'absolute', top: '12px', right: '12px' }}>
+                            <StatusPill status={video.status} stage={video.processing_stage} />
+                          </div>
+                          <div style={{ position: 'absolute', bottom: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
+                            {formatSeconds(video.duration_seconds)}
+                          </div>
                         </div>
-                        <h3>{video.original_filename}</h3>
-                        <div className="library-card-meta">
-                          <span>{formatSeconds(video.duration_seconds)}</span>
-                          <span>{formatDate(video.created_at)}</span>
-                          <span>{video.segment_count} segmentos</span>
-                        </div>
-                        {video.status === "processing" && <ProgressBar value={video.processing_progress} />}
-                        <div className="library-card-actions">
+
+                        <div style={{ padding: '16px', minWidth: 0 }}>
+                          <h3 style={{ margin: '0 0 12px 0', fontSize: '15px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--ink-900)' }} title={video.original_filename}>
+                            {video.original_filename}
+                          </h3>
+                          
+                          <div style={{ fontSize: '13px', color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Clock3 size={14} /> {formatDate(video.created_at)}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Database size={14} /> 
+                              {video.subarea_id ? (() => {
+                                let subName = "Sin área";
+                                areas.forEach(a => a.subareas.forEach(s => { if(s.id === video.subarea_id) subName = `${a.name} > ${s.name}`; }));
+                                return subName;
+                              })() : "Sin área asignada"}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <FileText size={14} /> {video.segment_count} segmentos indexados
+                            </div>
+                          </div>
+
+                          {video.status === "processing" && <ProgressBar value={video.processing_progress} />}
+                          
                           <button
-                            className="secondary-button compact"
+                            className="secondary-button"
+                            style={{ width: '100%', justifyContent: 'center', marginTop: video.status === "processing" ? '12px' : '0' }}
                             type="button"
                             onClick={() => {
                               setSelectedId(video.id);
@@ -1147,55 +1362,79 @@ function App() {
                               setActiveTab("assistant");
                             }}
                           >
-                            <Gauge size={15} />
-                            Ver expediente
-                          </button>
-                          <button
-                            className="secondary-button compact"
-                            type="button"
-                            onClick={() => {
-                              setSelectedId(video.id);
-                              setActiveView("video");
-                              setActiveTab("assistant");
-                            }}
-                            disabled={video.status !== "ready"}
-                          >
-                            <Bot size={15} />
-                            Consultar
+                            <FolderOpen size={16} />
+                            Abrir expediente
                           </button>
                         </div>
                       </article>
-                    ))
-                  )}
+                    ))}
+                  </div>
                 </div>
               </section>
             )}
 
             {activeView === "organization" && (
-              <section className="library-surface" style={{ display: "flex", gap: "24px", padding: "24px", minHeight: "calc(100vh - 40px)" }}>
-                <div style={{ flex: "0 0 350px", borderRight: "1px solid var(--line)", paddingRight: "24px", overflowY: "auto" }}>
-                  <div className="library-header" style={{ marginBottom: "24px" }}>
-                    <div>
-                      <span className="eyebrow">Configuración</span>
-                      <h2>Estructura</h2>
-                      <p>Gestiona áreas y subáreas.</p>
-                    </div>
+              <section className="library-surface">
+                <div className="library-header">
+                  <div>
+                    <span className="eyebrow">Configuración</span>
+                    <h2>Estructura Organizacional</h2>
+                    <p>Gestiona áreas y subáreas para clasificar el contenido de la institución.</p>
+                  </div>
+                </div>
+
+                <div className="library-grid" style={{ marginTop: '24px' }}>
+                  <div className="area-card" style={{ background: "var(--green-50)", borderStyle: "dashed", borderColor: "var(--green-300)" }}>
+                    <h3 style={{ color: "var(--green-900)" }}>Nueva Área</h3>
+                    <form className="add-form" onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!newAreaName.trim()) return;
+                      setLoading(true);
+                      try {
+                        await apiRequest("/areas", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ name: newAreaName.trim() })
+                        });
+                        setNewAreaName("");
+                        await loadAreas();
+                      } catch (err) {
+                        setError(err.message);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}>
+                      <input placeholder="Nombre del área..." value={newAreaName} onChange={e => setNewAreaName(e.target.value)} disabled={loading} />
+                      <button className="primary-button compact" type="submit" disabled={loading || !newAreaName.trim()}>Crear</button>
+                    </form>
                   </div>
 
-                  <div className="org-grid" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="area-card" style={{ background: "var(--green-50)", borderStyle: "dashed", marginBottom: "16px" }}>
-                      <h3 style={{ color: "var(--green-900)" }}>Nueva Área</h3>
+                  {areas.map(area => (
+                    <div className="area-card" key={area.id} style={{ borderColor: "var(--line)" }}>
+                      <h3>{area.name} <span>({area.subareas.length})</span></h3>
+                      <div className="subarea-list">
+                        {area.subareas.map(sub => (
+                          <div 
+                            className="subarea-item" 
+                            key={sub.id} 
+                            style={{ background: "var(--surface-soft)" }}
+                          >
+                            {sub.name}
+                          </div>
+                        ))}
+                      </div>
                       <form className="add-form" onSubmit={async (e) => {
                         e.preventDefault();
-                        if (!newAreaName.trim()) return;
+                        const subName = newSubareaNames[area.id] || "";
+                        if (!subName.trim()) return;
                         setLoading(true);
                         try {
-                          await apiRequest("/areas", {
+                          await apiRequest(`/areas/${area.id}/subareas`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ name: newAreaName.trim() })
+                            body: JSON.stringify({ name: subName.trim() })
                           });
-                          setNewAreaName("");
+                          setNewSubareaNames(prev => ({ ...prev, [area.id]: "" }));
                           await loadAreas();
                         } catch (err) {
                           setError(err.message);
@@ -1203,133 +1442,290 @@ function App() {
                           setLoading(false);
                         }
                       }}>
-                        <input placeholder="Nombre del área..." value={newAreaName} onChange={e => setNewAreaName(e.target.value)} disabled={loading} />
-                        <button className="primary-button compact" type="submit" disabled={loading || !newAreaName.trim()}>Crear</button>
+                        <input 
+                          placeholder="Nueva subárea..." 
+                          value={newSubareaNames[area.id] || ""} 
+                          onChange={e => setNewSubareaNames(prev => ({ ...prev, [area.id]: e.target.value }))} 
+                          disabled={loading} 
+                        />
+                        <button className="secondary-button compact" type="submit" disabled={loading || !newSubareaNames[area.id]?.trim()}>Añadir</button>
                       </form>
                     </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
-                    {areas.map(area => (
-                      <div className="area-card" key={area.id} style={{ marginBottom: "16px", cursor: "pointer", borderColor: selectedOrgArea?.id === area.id ? "var(--green-600)" : "var(--line)" }} onClick={() => { setSelectedOrgArea(area); setSelectedOrgSubarea(null); }}>
-                        <h3>{area.name} <span>({area.subareas.length})</span></h3>
-                        <div className="subarea-list">
-                          {area.subareas.map(sub => (
-                            <div 
-                              className="subarea-item" 
-                              key={sub.id} 
-                              onClick={(e) => { e.stopPropagation(); setSelectedOrgArea(area); setSelectedOrgSubarea(sub); }}
-                              style={{ 
-                                background: selectedOrgSubarea?.id === sub.id ? "var(--green-100)" : "var(--surface-soft)",
-                                color: selectedOrgSubarea?.id === sub.id ? "var(--green-900)" : "inherit",
-                                fontWeight: selectedOrgSubarea?.id === sub.id ? "bold" : "normal"
-                              }}
-                            >
-                              {sub.name}
-                            </div>
-                          ))}
-                        </div>
-                        <form className="add-form" onClick={e => e.stopPropagation()} onSubmit={async (e) => {
-                          e.preventDefault();
-                          const subName = newSubareaNames[area.id] || "";
-                          if (!subName.trim()) return;
-                          setLoading(true);
-                          try {
-                            await apiRequest(`/areas/${area.id}/subareas`, {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ name: subName.trim() })
-                            });
-                            setNewSubareaNames(prev => ({ ...prev, [area.id]: "" }));
-                            await loadAreas();
-                          } catch (err) {
-                            setError(err.message);
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}>
-                          <input 
-                            placeholder="Nueva subárea..." 
-                            value={newSubareaNames[area.id] || ""} 
-                            onChange={e => setNewSubareaNames(prev => ({ ...prev, [area.id]: e.target.value }))} 
-                            disabled={loading} 
-                          />
-                          <button className="secondary-button compact" type="submit" disabled={loading || !newSubareaNames[area.id]?.trim()}>Añadir</button>
-                        </form>
-                      </div>
-                    ))}
+            {activeView === "roles" && (
+              <section className="organization-page">
+                {/* Clean Top Action Bar */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                  <div>
+                    <h2 style={{ margin: 0, color: 'var(--green-950)' }}>Roles y Permisos</h2>
+                    <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '14px' }}>
+                      Gestiona el nivel de acceso y las áreas permitidas para los usuarios de la plataforma.
+                    </p>
                   </div>
+                  <button className="primary-button" onClick={() => {
+                    setEditingRoleId(null);
+                    setNewRoleName("");
+                    setNewRolePerms([]);
+                    setNewRoleAreas(["*"]);
+                    setIsRoleModalOpen(true);
+                  }}>
+                    <Plus size={18} />
+                    Añadir Rol
+                  </button>
                 </div>
 
-                <div style={{ flex: 1, paddingLeft: "12px", overflowY: "auto" }}>
-                  {!selectedOrgArea && !selectedOrgSubarea ? (
-                    <EmptyState
-                      icon={Database}
-                      title="Selecciona un Área o Subárea"
-                      body="Haz clic en un área del panel izquierdo para ver sus videos asignados."
-                    />
-                  ) : (
-                    <>
-                      <div className="library-header" style={{ marginBottom: "24px" }}>
-                        <div>
-                          <span className="eyebrow">{selectedOrgArea.name}</span>
-                          <h2>{selectedOrgSubarea ? selectedOrgSubarea.name : "Todos los videos del área"}</h2>
+                {/* Grid of existing roles */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+                  {roles.map(r => {
+                    const isGlobal = r.allowed_areas && r.allowed_areas.includes("*");
+                    return (
+                      <div className="role-card-premium" key={r.id}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)', paddingBottom: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Shield size={20} color="var(--green-800)" />
+                            <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--ink-900)' }}>{r.name}</h3>
+                          </div>
+                          {isGlobal ? (
+                            <span style={{ fontSize: '10px', background: 'var(--green-700)', color: 'white', padding: '4px 8px', borderRadius: '12px', fontWeight: 'bold' }}>Acceso Global</span>
+                          ) : (
+                            <span style={{ fontSize: '10px', background: 'var(--gold-600)', color: 'white', padding: '4px 8px', borderRadius: '12px', fontWeight: 'bold' }}>Por Áreas</span>
+                          )}
+                          <button 
+                            className="icon-button" 
+                            style={{ width: '28px', height: '28px', marginLeft: 'auto' }} 
+                            onClick={() => {
+                              setEditingRoleId(r.id);
+                              setNewRoleName(r.name);
+                              setNewRolePerms(r.permissions);
+                              setNewRoleAreas(r.allowed_areas || ["*"]);
+                              setIsRoleModalOpen(true);
+                            }}
+                            title="Editar Rol"
+                          >
+                            <Edit2 size={14} />
+                          </button>
                         </div>
-                      </div>
-                      
-                      <div className="library-grid">
-                        {videos
-                          .filter(v => {
-                            if (selectedOrgSubarea) return v.subarea_id === selectedOrgSubarea.id;
-                            if (selectedOrgArea) {
-                              const subIds = selectedOrgArea.subareas.map(s => s.id);
-                              return subIds.includes(v.subarea_id);
-                            }
-                            return false;
-                          })
-                          .map(video => (
-                            <article className="library-card" key={video.id}>
-                              <div className="library-card-content">
-                                <div className="card-top">
-                                  <StatusPill status={video.status} stage={video.processing_stage} />
-                                  <span className="card-meta">{formatSeconds(video.duration_seconds)}</span>
-                                </div>
-                                <h3 className="card-title" title={video.original_filename}>{video.original_filename}</h3>
-                                <p className="card-date">Cargado {formatDate(video.created_at)}</p>
-                                <button
-                                  className="secondary-button"
-                                  style={{ width: "100%", marginTop: "12px" }}
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedId(video.id);
-                                    setActiveView("library"); // Jump to library detail
-                                    setActiveTab("assistant");
-                                  }}
-                                >
-                                  Ver transcripciones y manuales
-                                </button>
-                              </div>
-                            </article>
-                          ))
-                        }
                         
-                        {videos.filter(v => {
-                            if (selectedOrgSubarea) return v.subarea_id === selectedOrgSubarea.id;
-                            if (selectedOrgArea) {
-                              const subIds = selectedOrgArea.subareas.map(s => s.id);
-                              return subIds.includes(v.subarea_id);
-                            }
-                            return false;
-                          }).length === 0 && (
-                          <div style={{ gridColumn: "1 / -1" }}>
-                            <EmptyState
-                              icon={FileVideo}
-                              title="Sin videos"
-                              body="No hay videos asignados a esta sección."
-                            />
+                        <div>
+                          <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Permisos Asignados</span>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {r.permissions.map(pId => {
+                              const pDef = availablePermissions.find(x => x.id === pId);
+                              return (
+                                <span className="role-chip" key={pId}>
+                                  {pDef ? pDef.label : pId}
+                                </span>
+                              );
+                            })}
+                            {r.permissions.length === 0 && <span style={{fontSize:'12px', color:'var(--muted)'}}>Sin permisos</span>}
+                          </div>
+                        </div>
+                        
+                        {!isGlobal && r.allowed_areas && r.allowed_areas.length > 0 && (
+                          <div style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px dashed var(--line)' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Áreas Autorizadas</span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                              {r.allowed_areas.map(aId => {
+                                const aDef = areas.find(x => x.id === aId);
+                                return (
+                                  <span className="role-chip" key={aId} style={{ background: 'var(--green-50)', borderColor: 'var(--green-100)', color: 'var(--green-800)' }}>
+                                    {aDef ? aDef.name : "Desconocida"}
+                                  </span>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
                       </div>
-                    </>
-                  )}
+                    );
+                  })}
+                </div>
+
+                {/* ROLE CREATION MODAL */}
+                {isRoleModalOpen && (
+                  <div className="modal-overlay" onClick={closeRoleModal}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                      <div className="modal-header">
+                        <h2>{editingRoleId ? 'Editar Rol' : 'Crear Nuevo Rol'}</h2>
+                        <button className="close-btn" onClick={closeRoleModal}>
+                          <X size={20} />
+                        </button>
+                      </div>
+
+                      <form onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!newRoleName.trim()) return;
+                        setLoading(true);
+                        try {
+                          if (editingRoleId) {
+                            await apiRequest(`/roles/${editingRoleId}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name: newRoleName.trim(), permissions: newRolePerms, allowed_areas: newRoleAreas })
+                            });
+                          } else {
+                            await apiRequest('/roles', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name: newRoleName.trim(), permissions: newRolePerms, allowed_areas: newRoleAreas })
+                            });
+                          }
+                          closeRoleModal();
+                          await loadRoles();
+                        } catch(err) { setError(err.message); }
+                        finally { setLoading(false); }
+                      }} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                        
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--ink-700)' }}>Nombre del Rol</span>
+                          <input 
+                            placeholder="Ej. Administrador de RRHH..." 
+                            value={newRoleName} 
+                            onChange={e => setNewRoleName(e.target.value)} 
+                            disabled={loading} 
+                            required 
+                            style={{ width: '100%', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)', outline: 'none', transition: 'border 0.2s', fontSize: '14px' }}
+                            onFocus={e => e.target.style.borderColor = 'var(--green-700)'}
+                            onBlur={e => e.target.style.borderColor = 'var(--line)'}
+                          />
+                        </label>
+
+                        <div>
+                          <span style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid var(--line)', paddingBottom: '6px', display: 'block', marginBottom: '16px', color: 'var(--ink-700)' }}>Permisos del Sistema</span>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
+                            {availablePermissions.map(p => (
+                              <label key={p.id} className={`toggle-label ${newRolePerms.includes(p.id) ? 'active' : ''}`}>
+                                <div className="toggle-text-group">
+                                  <span className="toggle-title">{p.label}</span>
+                                </div>
+                                <input 
+                                  type="checkbox" 
+                                  className="hidden-input"
+                                  checked={newRolePerms.includes(p.id)}
+                                  onChange={e => {
+                                    if (e.target.checked) setNewRolePerms([...newRolePerms, p.id]);
+                                    else setNewRolePerms(newRolePerms.filter(x => x !== p.id));
+                                  }}
+                                />
+                                <div className="toggle-switch"></div>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid var(--line)', paddingBottom: '6px', display: 'block', marginBottom: '16px', color: 'var(--ink-700)' }}>Acceso a Áreas Específicas</span>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
+                            <label className={`toggle-label ${newRoleAreas.includes("*") ? 'active' : ''}`}>
+                              <div className="toggle-text-group">
+                                <span className="toggle-title">Todas las Áreas</span>
+                                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Acceso Global</span>
+                              </div>
+                              <input 
+                                type="checkbox" 
+                                className="hidden-input"
+                                checked={newRoleAreas.includes("*")}
+                                onChange={e => {
+                                  if (e.target.checked) setNewRoleAreas(["*"]);
+                                  else setNewRoleAreas([]);
+                                }}
+                              />
+                              <div className="toggle-switch"></div>
+                            </label>
+
+                            {areas.map(area => {
+                              const isGlobal = newRoleAreas.includes("*");
+                              const isChecked = isGlobal || newRoleAreas.includes(area.id);
+                              return (
+                                <label key={area.id} className={`toggle-label ${isChecked ? 'active' : ''} ${isGlobal ? 'disabled' : ''}`}>
+                                  <div className="toggle-text-group">
+                                    <span className="toggle-title">{area.name}</span>
+                                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Área Específica</span>
+                                  </div>
+                                  <input 
+                                    type="checkbox" 
+                                    className="hidden-input"
+                                    checked={isChecked}
+                                    disabled={isGlobal}
+                                    onChange={e => {
+                                      if (e.target.checked) setNewRoleAreas([...newRoleAreas, area.id]);
+                                      else setNewRoleAreas(newRoleAreas.filter(x => x !== area.id));
+                                    }}
+                                  />
+                                  <div className="toggle-switch"></div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div style={{ borderTop: '1px solid var(--line)', paddingTop: '20px', display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                          <button type="button" className="secondary-button" onClick={closeRoleModal}>Cancelar</button>
+                          <button type="submit" className="primary-button" disabled={loading || !newRoleName.trim()}>{editingRoleId ? 'Actualizar Rol' : 'Guardar Rol'}</button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {activeView === "users" && (
+              <section className="organization-page">
+                <div className="upload-hero">
+                  <div>
+                    <span className="eyebrow">Administración</span>
+                    <h2>Gestión de Usuarios</h2>
+                    <p>Administra los accesos de los colaboradores al centro de capacitación inteligente.</p>
+                  </div>
+                </div>
+                <div className="org-grid">
+                  <div className="area-card" style={{ borderColor: "var(--primary-color)", gridColumn: "1 / -1", maxWidth: "600px" }}>
+                    <h3>Crear Nuevo Usuario</h3>
+                    <form className="add-form" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }} onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!newUserEmail.trim() || !newUserPass || !newUserRole) return;
+                      setLoading(true);
+                      try {
+                        await apiRequest('/users', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ email: newUserEmail.trim(), password: newUserPass, role_id: newUserRole })
+                        });
+                        setNewUserEmail("");
+                        setNewUserPass("");
+                        setNewUserRole("");
+                        await loadUsersList();
+                      } catch(err) { setError(err.message); }
+                      finally { setLoading(false); }
+                    }}>
+                      <input type="email" placeholder="Correo corporativo (@bmsc.com.bo)" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} disabled={loading} required />
+                      <input type="password" placeholder="Contraseña temporal" value={newUserPass} onChange={e => setNewUserPass(e.target.value)} disabled={loading} required />
+                      <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)} disabled={loading} style={{ padding: "8px", borderRadius: "6px", border: "1px solid var(--line)" }} required>
+                        <option value="">Seleccionar rol...</option>
+                        {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      <button className="primary-button compact" type="submit" disabled={loading || !newUserEmail.trim() || !newUserPass || !newUserRole}>Crear Usuario</button>
+                    </form>
+                  </div>
+
+                  {usersList.map(u => (
+                    <div className="area-card" key={u.id} style={{ borderColor: "var(--line)" }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Users size={20} color="var(--primary-color)" />
+                        <h3 style={{ margin: 0, wordBreak: 'break-all' }}>{u.email}</h3>
+                      </div>
+                      <div style={{ marginTop: '12px' }}>
+                        <span style={{ fontSize: '12px', background: 'var(--surface-soft)', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                          Rol: {u.role?.name || "Sin Rol"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </section>
             )}
@@ -1362,7 +1758,7 @@ function App() {
                       <BookOpen size={20} />
                     </div>
                     <div>
-                      <strong>Generar manual</strong>
+                      <strong>Manuales del Video</strong>
                       <span>{latestManual ? `Último: ${latestManual.title}` : "Sin manuales generados"}</span>
                     </div>
                     <ArrowRight size={18} />
@@ -1390,53 +1786,51 @@ function App() {
               <section className="manual-surface">
               <div className="manual-header">
                 <div>
-                  <span className="eyebrow">Manuales del video</span>
-                  <h3>Generador de documentos</h3>
-                  <p>{selectedVideo.original_filename}</p>
+                  <span className="eyebrow">Documentación</span>
+                  <h3>Manuales y Guías</h3>
                 </div>
-                <button className="icon-button light" type="button" onClick={() => loadManuals(selectedVideo.id)} title="Actualizar manuales">
-                  <RefreshCcw size={16} />
-                </button>
-              </div>
+                
+                {hasPermission("generate_manual") && (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div className="segmented-control" style={{ marginRight: '8px' }}>
+                      <button
+                        type="button"
+                        className={cx(manualMode === "extractive" && "active")}
+                        onClick={() => setManualMode("extractive")}
+                      >
+                        <FileText size={16} />
+                        Sin LLM
+                      </button>
+                      <button
+                        type="button"
+                        className={cx(manualMode === "llm" && "active")}
+                        onClick={() => setManualMode("llm")}
+                      >
+                        <Bot size={16} />
+                        LLM local
+                      </button>
+                    </div>
 
-              <div className="manual-controls">
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={cx(manualMode === "extractive" && "active")}
-                    onClick={() => setManualMode("extractive")}
-                  >
-                    <FileText size={16} />
-                    Sin LLM
-                  </button>
-                  <button
-                    type="button"
-                    className={cx(manualMode === "llm" && "active")}
-                    onClick={() => setManualMode("llm")}
-                  >
-                    <Bot size={16} />
-                    LLM local
-                  </button>
-                </div>
+                    {manualMode === "llm" && (
+                      <input
+                        className="manual-model-input"
+                        value={manualModel}
+                        onChange={(event) => setManualModel(event.target.value)}
+                        placeholder="Modelo Ollama"
+                      />
+                    )}
 
-                {manualMode === "llm" && (
-                  <input
-                    className="manual-model-input"
-                    value={manualModel}
-                    onChange={(event) => setManualModel(event.target.value)}
-                    placeholder="Modelo Ollama"
-                  />
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={handleGenerateManual}
+                      disabled={selectedVideo.status !== "ready" || generatingManual}
+                    >
+                      {generatingManual ? <Loader2 className="spin" size={17} /> : <BookOpen size={17} />}
+                      Generar manual
+                    </button>
+                  </div>
                 )}
-
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={handleGenerateManual}
-                  disabled={selectedVideo.status !== "ready" || generatingManual}
-                >
-                  {generatingManual ? <Loader2 className="spin" size={17} /> : <BookOpen size={17} />}
-                  Generar manual
-                </button>
               </div>
 
               <div className="manual-list">

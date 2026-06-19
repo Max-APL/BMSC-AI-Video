@@ -3,7 +3,45 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
+
+class RoleBase(BaseModel):
+    name: str
+    permissions: List[str]
+    allowed_areas: List[str] = Field(default_factory=list)
+
+class RoleCreate(RoleBase):
+    pass
+
+class RoleUpdate(BaseModel):
+    name: Optional[str] = None
+    permissions: Optional[List[str]] = None
+    allowed_areas: Optional[List[str]] = None
+
+class RoleResponse(RoleBase):
+    id: str
+    created_at: str
+
+class UserBase(BaseModel):
+    email: EmailStr
+    role_id: str
+
+class UserCreate(UserBase):
+    password: str
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    role_id: Optional[str] = None
+    password: Optional[str] = None
+
+class UserResponse(UserBase):
+    id: str
+    created_at: str
+    role: Optional[RoleResponse] = None
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 class VideoStatus(str, Enum):

@@ -2,13 +2,22 @@ from sqlalchemy import Column, String, Float, Integer, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from .database import Base
 
+class DBRole(Base):
+    __tablename__ = "roles"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    permissions = Column(String, nullable=False) # JSON encoded list of permissions
+    allowed_areas = Column(String, nullable=True) # JSON encoded list of area IDs or ["*"] for all
+    created_at = Column(String, nullable=False)
+
 class DBUser(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    is_admin = Column(Boolean, default=False)
+    role_id = Column(String, ForeignKey("roles.id"), nullable=False)
     created_at = Column(String, nullable=False)
 
 class DBArea(Base):

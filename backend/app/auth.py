@@ -55,3 +55,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if user is None:
         raise credentials_exception
     return user
+
+def require_permission(permission: str):
+    def dependency(current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
+        from .db_models import DBRole
+        import json
+        role = db.query(DBRole).filter(DBRole.id == current_user.role_id).first()
+        if not role or not role.permissions:
+            raise HTTPException(status_code=403, detail="Sin permisos")
+        perms = json.loads(role.permissions)
+        if permission not in perms:
+            raise HTTPException(status_code=403, detail=f"Falta el permiso: {permission}")
+        return current_user
+    return dependency

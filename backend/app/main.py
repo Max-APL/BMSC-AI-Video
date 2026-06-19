@@ -29,9 +29,9 @@ from .storage import VideoStorage
 from .transcription import FasterWhisperTranscriber
 from .database import Base, engine
 
-from .auth import get_current_user
+from .auth import get_current_user, require_permission
 from .db_models import DBUser
-from .routers import auth, areas
+from .routers import auth, areas, users, roles
 
 app = FastAPI(
     title=settings.app_name,
@@ -51,6 +51,8 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(areas.router)
+app.include_router(users.router)
+app.include_router(roles.router)
 
 storage = VideoStorage(settings)
 transcriber = FasterWhisperTranscriber(settings)
@@ -62,16 +64,36 @@ service = VideoService(settings, storage, transcriber, search_engine)
 def recover_interrupted_processing() -> None:
     Base.metadata.create_all(bind=engine)
     
-    # Create default admin user if not exists
+    # Create default roles and admin user if not exists
     from sqlalchemy.orm import Session
     from .database import SessionLocal
-    from .db_models import DBUser
+    from .db_models import DBUser, DBRole
     from .auth import get_password_hash
     import uuid
     import datetime
+    import json
     
     db = SessionLocal()
     try:
+        # Check and create Super Admin role
+        super_admin_role = db.query(DBRole).filter(DBRole.name == "Super Admin").first()
+        if not super_admin_role:
+            super_admin_role = DBRole(
+                id=str(uuid.uuid4()),
+                name="Super Admin",
+                permissions=json.dumps([
+                    "view_dashboard", "view_videos", "view_library", 
+                    "view_organization", "view_users", "view_roles",
+                    "upload_video", "generate_manual", "manage_organization",
+                    "manage_users", "manage_roles"
+                ]),
+                allowed_areas=json.dumps(["*"]),
+                created_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
+            )
+            db.add(super_admin_role)
+            db.commit()
+            db.refresh(super_admin_role)
+
         admin_exists = db.query(DBUser).filter(DBUser.email == "admin@bmsc.com.bo").first()
         if not admin_exists:
             hashed_pw = get_password_hash("admin123")
@@ -79,10 +101,15 @@ def recover_interrupted_processing() -> None:
                 id=str(uuid.uuid4()),
                 email="admin@bmsc.com.bo",
                 hashed_password=hashed_pw,
-                is_admin=True,
+                role_id=super_admin_role.id,
                 created_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
             ))
             db.commit()
+        else:
+            # Migration for existing admin
+            if not hasattr(admin_exists, 'role_id') or not admin_exists.role_id:
+                 admin_exists.role_id = super_admin_role.id
+                 db.commit()
     finally:
         db.close()
 
@@ -111,7 +138,7 @@ def system_dependencies(current_user: DBUser = Depends(get_current_user)) -> Sys
 async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    current_user: DBUser = Depends(get_current_user)
+    current_user: DBUser = Depends(require_permission("upload_video"))
 ) -> VideoMetadata:
     try:
         metadata = await service.create_video(file)
@@ -124,7 +151,32 @@ async def upload_video(
 
 @app.get("/videos", response_model=List[VideoMetadata])
 def list_videos(current_user: DBUser = Depends(get_current_user)) -> List[VideoMetadata]:
-    return service.list_videos()
+    from .database import SessionLocal
+    from .db_models import DBRole, DBSubArea
+    import json
+    
+    videos = service.list_videos()
+    
+    db = SessionLocal()
+    try:
+        role = db.query(DBRole).filter(DBRole.id == current_user.role_id).first()
+        allowed_areas = json.loads(role.allowed_areas) if role and role.allowed_areas else []
+        if "*" in allowed_areas:
+            return videos
+            
+        subareas = db.query(DBSubArea).all()
+        subarea_to_area = {sa.id: sa.area_id for sa in subareas}
+        
+        filtered = []
+        for v in videos:
+            if not v.subarea_id:
+                continue
+            area_id = subarea_to_area.get(v.subarea_id)
+            if area_id in allowed_areas:
+                filtered.append(v)
+        return filtered
+    finally:
+        db.close()
 
 
 @app.get("/videos/{video_id}", response_model=VideoMetadata)
@@ -213,7 +265,7 @@ def create_manual(
     video_id: str,
     request: ManualRequest,
     background_tasks: BackgroundTasks,
-    current_user: DBUser = Depends(get_current_user)
+    current_user: DBUser = Depends(require_permission("generate_manual"))
 ) -> ManualMetadata:
     try:
         metadata = service.create_manual(video_id, request)
