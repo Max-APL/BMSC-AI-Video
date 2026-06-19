@@ -123,6 +123,18 @@ def recover_interrupted_processing() -> None:
     recovered = service.recover_interrupted_processing()
     log_event(f"Interrupted processing recovery complete recovered={recovered}")
 
+    log_event(f"Precargando Whisper model={settings.whisper_model} device={settings.whisper_device}")
+    try:
+        _ = transcriber.model
+        log_event("Whisper listo")
+    except Exception as exc:
+        log_event(f"Whisper preload error: {exc}")
+
+    # LLM (llama-cpp-python) is NOT preloaded at startup.
+    # Loading both ctranslate2 (Whisper) and llama.cpp on CUDA in the same thread
+    # during startup corrupts the CUDA context used by background threads for
+    # transcription. The LLM is loaded lazily on the first manual-generation request.
+
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:

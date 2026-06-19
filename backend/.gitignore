@@ -5,3 +5,5 @@ __pycache__/
 .env
 storage/*
 !storage/.gitkeep
+models/
+.claude/

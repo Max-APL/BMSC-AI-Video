@@ -386,7 +386,6 @@ function App() {
   const [generatingManual, setGeneratingManual] = React.useState(false);
   const [manuals, setManuals] = React.useState([]);
   const [manualMode, setManualMode] = React.useState("extractive");
-  const [manualModel, setManualModel] = React.useState("llama3.1:8b");
   const [manualPreview, setManualPreview] = React.useState(null);
   const [manualToDelete, setManualToDelete] = React.useState(null);
   const [error, setError] = React.useState("");
@@ -710,8 +709,7 @@ function App() {
         include_screenshots: true,
       };
       if (manualMode === "llm") {
-        body.provider = "ollama";
-        body.model = manualModel.trim() || "llama3.1:8b";
+        body.provider = "llama_cpp";
       }
       const manual = await apiRequest(`/videos/${selectedVideo.id}/manuals`, {
         method: "POST",
@@ -1811,14 +1809,6 @@ function App() {
                       </button>
                     </div>
 
-                    {manualMode === "llm" && (
-                      <input
-                        className="manual-model-input"
-                        value={manualModel}
-                        onChange={(event) => setManualModel(event.target.value)}
-                        placeholder="Modelo Ollama"
-                      />
-                    )}
 
                     <button
                       className="primary-button"

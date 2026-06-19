@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import json
 import re
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from threading import Lock
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .config import Settings
+from .debug import log_event
 from .models import TranscriptSegment, VideoMetadata
+
+_BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
+_LLAMA_REPO_ID = "bartowski/Llama-3.2-3B-Instruct-GGUF"
+_LLAMA_FILENAME = "Llama-3.2-3B-Instruct-Q4_K_M.gguf"
 
 
 @dataclass(frozen=True)
@@ -170,21 +173,17 @@ def build_llm_manual(
     screenshots_by_block: Optional[ScreenshotMap] = None,
     on_progress: Optional[Callable[[str, int, int, str], None]] = None,
 ) -> ManualBuildResult:
-    if provider != "ollama":
-        raise ValueError("Proveedor LLM no soportado. Usa provider='ollama'.")
-
     screenshots_by_block = screenshots_by_block or {}
     blocks = build_text_blocks(
         segments,
         chunk_seconds=settings.manual_llm_chunk_seconds,
         max_chars=settings.manual_llm_chunk_max_chars,
     )
-    client = OllamaClient(
-        base_url=settings.llm_base_url,
-        model=model,
-        timeout_seconds=settings.llm_timeout_seconds,
+    client: Any = LlamaCppClient(
+        model_path=settings.llm_model_path,
+        n_ctx=settings.llm_num_ctx,
+        n_gpu_layers=settings.llm_n_gpu_layers,
         temperature=settings.llm_temperature,
-        num_ctx=settings.llm_num_ctx,
         terminology_hints=settings.manual_terminology_hints,
     )
     title = manual_title(metadata)
@@ -250,22 +249,103 @@ def build_llm_manual(
     )
 
 
-class OllamaClient:
+_llama_lock = Lock()
+_llama_instance: Optional[Any] = None
+
+
+def _ensure_llama_model(configured_path: Optional[Path]) -> Path:
+    target = configured_path or (_BASE_DIR / "models" / _LLAMA_FILENAME)
+    if target.exists():
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    log_event(f"Modelo GGUF no encontrado en {target}. Descargando desde Hugging Face...")
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub no esta instalado. Ejecuta: pip install huggingface_hub"
+        ) from exc
+    downloaded = hf_hub_download(
+        repo_id=_LLAMA_REPO_ID,
+        filename=_LLAMA_FILENAME,
+        local_dir=str(target.parent),
+        local_dir_use_symlinks=False,
+    )
+    log_event(f"Modelo descargado en {downloaded}")
+    return Path(downloaded)
+
+
+def _get_llama(model_path: Optional[Path], n_ctx: int, n_gpu_layers: int) -> Any:
+    global _llama_instance
+    with _llama_lock:
+        if _llama_instance is None:
+            try:
+                from llama_cpp import Llama
+            except ImportError as exc:
+                raise RuntimeError(
+                    "llama-cpp-python no esta instalado. "
+                    'Instala con: CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir'
+                ) from exc
+
+            gpu_supported = False
+            try:
+                from llama_cpp import llama_supports_gpu_offload
+                gpu_supported = llama_supports_gpu_offload()
+                if not gpu_supported:
+                    log_event(
+                        "ADVERTENCIA: llama-cpp-python NO tiene soporte CUDA. "
+                        'Reinstala con: CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir'
+                    )
+                else:
+                    log_event("llama-cpp-python: soporte CUDA confirmado")
+            except Exception:
+                log_event("llama-cpp-python: no se pudo verificar soporte GPU (version antigua?)")
+
+            resolved = _ensure_llama_model(model_path)
+            effective_gpu_layers = n_gpu_layers if gpu_supported else 0
+            log_event(
+                f"Cargando modelo GGUF path={resolved} "
+                f"n_ctx={n_ctx} n_gpu_layers={effective_gpu_layers}"
+            )
+            try:
+                _llama_instance = Llama(
+                    model_path=str(resolved),
+                    n_ctx=n_ctx,
+                    n_gpu_layers=effective_gpu_layers,
+                    verbose=True,
+                )
+                log_event(
+                    f"Modelo GGUF cargado en {'GPU' if effective_gpu_layers != 0 else 'CPU'}"
+                )
+            except Exception as exc:
+                if effective_gpu_layers != 0:
+                    log_event(f"Carga en GPU fallo ({exc}); reintentando en CPU")
+                    _llama_instance = Llama(
+                        model_path=str(resolved),
+                        n_ctx=n_ctx,
+                        n_gpu_layers=0,
+                        verbose=True,
+                    )
+                    log_event("Modelo GGUF cargado en CPU (fallback)")
+                else:
+                    raise
+    return _llama_instance
+
+
+class LlamaCppClient:
     def __init__(
         self,
         *,
-        base_url: str,
-        model: str,
-        timeout_seconds: int,
+        model_path: Optional[Path],
+        n_ctx: int,
+        n_gpu_layers: int,
         temperature: float,
-        num_ctx: int,
         terminology_hints: str,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.timeout_seconds = timeout_seconds
+        self.model_path = model_path
+        self.n_ctx = n_ctx
+        self.n_gpu_layers = n_gpu_layers
         self.temperature = temperature
-        self.num_ctx = num_ctx
         self.manual_terminology_hints = terminology_hints
 
     def generate_section(
@@ -383,57 +463,40 @@ Secciones generadas:
         user_prompt: str,
         on_delta: Optional[Callable[[str, str], None]] = None,
     ) -> str:
-        payload = {
-            "model": self.model,
-            "stream": on_delta is not None,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "options": {
-                "temperature": self.temperature,
-                "num_ctx": self.num_ctx,
-            },
-        }
-        request = urllib.request.Request(
-            f"{self.base_url}/api/chat",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                if on_delta is None:
-                    data = json.loads(response.read().decode("utf-8"))
-                else:
-                    parts: List[str] = []
-                    for raw_line in response:
-                        line = raw_line.decode("utf-8").strip()
-                        if not line:
-                            continue
-                        data = json.loads(line)
-                        delta = data.get("message", {}).get("content") or ""
-                        if delta:
-                            parts.append(delta)
-                            on_delta("".join(parts), delta)
-                        if data.get("done"):
-                            break
-                    content = "".join(parts).strip()
-                    if not content:
-                        raise RuntimeError("Ollama no devolvio contenido para el manual.")
-                    return content
-        except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"No se pudo conectar con Ollama en {self.base_url}. "
-                "Verifica que Ollama este corriendo y que el modelo este descargado."
-            ) from exc
-        except TimeoutError as exc:
-            raise RuntimeError("La generacion con Ollama excedio el tiempo limite.") from exc
+        llm = _get_llama(self.model_path, self.n_ctx, self.n_gpu_layers)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        if on_delta is None:
+            response = llm.create_chat_completion(
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=4096,
+            )
+            content = response["choices"][0]["message"]["content"] or ""
+            if not content:
+                raise RuntimeError("llama-cpp-python no devolvio contenido para el manual.")
+            return content
+        else:
+            parts: List[str] = []
+            stream = llm.create_chat_completion(
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=4096,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk["choices"][0]["delta"].get("content") or ""
+                if delta:
+                    parts.append(delta)
+                    on_delta("".join(parts), delta)
+            content = "".join(parts).strip()
+            if not content:
+                raise RuntimeError("llama-cpp-python no devolvio contenido para el manual.")
+            return content
 
-        content = data.get("message", {}).get("content")
-        if not content:
-            raise RuntimeError("Ollama no devolvio contenido para el manual.")
-        return content
+
 
 
 def build_time_blocks(

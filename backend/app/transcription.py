@@ -30,12 +30,23 @@ def get_wav_duration(audio_path: Path) -> Optional[float]:
         return None
 
 
+def _imageio_ffmpeg_exe() -> Optional[str]:
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
 def get_ffmpeg_status(ffmpeg_bin: str = "ffmpeg") -> Dict[str, Optional[str] | bool]:
     configured_path = Path(ffmpeg_bin).expanduser()
     if configured_path.is_file():
         ffmpeg_path = str(configured_path.resolve())
     else:
         ffmpeg_path = shutil.which(ffmpeg_bin)
+
+    if not ffmpeg_path:
+        ffmpeg_path = _imageio_ffmpeg_exe()
 
     if not ffmpeg_path:
         return {
@@ -115,11 +126,13 @@ class FasterWhisperTranscriber:
     @property
     def model(self):
         if self._model is None:
+            device = self.settings.whisper_device
+            compute_type = self.settings.whisper_compute_type
             log_event(
                 "Loading faster-whisper model "
                 f"model={self.settings.whisper_model} "
-                f"device={self.settings.whisper_device} "
-                f"compute_type={self.settings.whisper_compute_type}"
+                f"device={device} "
+                f"compute_type={compute_type}"
             )
             try:
                 from faster_whisper import WhisperModel
@@ -128,15 +141,24 @@ class FasterWhisperTranscriber:
                     "faster-whisper no esta instalado. Ejecuta pip install -r requirements.txt."
                 ) from exc
 
-            kwargs = {
-                "device": self.settings.whisper_device,
-                "compute_type": self.settings.whisper_compute_type,
-            }
+            kwargs: dict = {"device": device, "compute_type": compute_type}
             if self.settings.whisper_model_dir:
                 kwargs["download_root"] = str(self.settings.whisper_model_dir)
 
-            self._model = WhisperModel(self.settings.whisper_model, **kwargs)
-            log_event("Faster-whisper model loaded")
+            try:
+                self._model = WhisperModel(self.settings.whisper_model, **kwargs)
+                log_event(f"Faster-whisper model loaded on {device}")
+            except Exception as exc:
+                if device != "cpu":
+                    log_event(
+                        f"GPU model load failed ({exc}); retrying on CPU with int8"
+                    )
+                    kwargs["device"] = "cpu"
+                    kwargs["compute_type"] = "int8"
+                    self._model = WhisperModel(self.settings.whisper_model, **kwargs)
+                    log_event("Faster-whisper model loaded on CPU (fallback)")
+                else:
+                    raise TranscriptionError(f"No se pudo cargar faster-whisper: {exc}") from exc
         return self._model
 
     def transcribe(
