@@ -3,7 +3,45 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
+
+class RoleBase(BaseModel):
+    name: str
+    permissions: List[str]
+    allowed_areas: List[str] = Field(default_factory=list)
+
+class RoleCreate(RoleBase):
+    pass
+
+class RoleUpdate(BaseModel):
+    name: Optional[str] = None
+    permissions: Optional[List[str]] = None
+    allowed_areas: Optional[List[str]] = None
+
+class RoleResponse(RoleBase):
+    id: str
+    created_at: str
+
+class UserBase(BaseModel):
+    email: EmailStr
+    role_id: str
+
+class UserCreate(UserBase):
+    password: str
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    role_id: Optional[str] = None
+    password: Optional[str] = None
+
+class UserResponse(UserBase):
+    id: str
+    created_at: str
+    role: Optional[RoleResponse] = None
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 class VideoStatus(str, Enum):
@@ -47,6 +85,11 @@ class VideoMetadata(BaseModel):
     segment_count: int = 0
     chunk_count: int = 0
     error: Optional[str] = None
+    subarea_id: Optional[str] = None
+
+class VideoUpdate(BaseModel):
+    original_filename: Optional[str] = None
+    subarea_id: Optional[str] = None
 
 
 class TranscriptSegment(BaseModel):
@@ -106,6 +149,7 @@ class ManualRequest(BaseModel):
     provider: Optional[str] = Field(None, description="Proveedor local del LLM")
     model: Optional[str] = Field(None, description="Modelo local para modo llm")
     include_timestamps: bool = True
+    include_screenshots: bool = True
 
 
 class ManualMetadata(BaseModel):
@@ -117,6 +161,7 @@ class ManualMetadata(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     include_timestamps: bool = True
+    include_screenshots: bool = True
     title: str
     filename: str
     created_at: str
@@ -129,6 +174,7 @@ class ManualMetadata(BaseModel):
     last_generated_text: Optional[str] = None
     section_count: int = 0
     word_count: int = 0
+    screenshot_count: int = 0
     error: Optional[str] = None
 
 

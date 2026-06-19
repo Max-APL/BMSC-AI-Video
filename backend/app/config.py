@@ -72,8 +72,14 @@ class Settings:
     search_chunk_seconds: int = _env_int("SEARCH_CHUNK_SECONDS", 14)
     search_chunk_max_chars: int = _env_int("SEARCH_CHUNK_MAX_CHARS", 320)
 
-    manual_chunk_seconds: int = _env_int("MANUAL_CHUNK_SECONDS", 300)
+    manual_chunk_seconds: int = _env_int("MANUAL_CHUNK_SECONDS", 90)
+    manual_llm_chunk_seconds: int = _env_int("MANUAL_LLM_CHUNK_SECONDS", 300)
     manual_llm_chunk_max_chars: int = _env_int("MANUAL_LLM_CHUNK_MAX_CHARS", 7000)
+    manual_terminology_hints: str = os.getenv("MANUAL_TERMINOLOGY_HINTS", "").strip()
+    manual_screenshot_offset_seconds: int = _env_int("MANUAL_SCREENSHOT_OFFSET_SECONDS", 2)
+    manual_screenshot_max_count: int = _env_int("MANUAL_SCREENSHOT_MAX_COUNT", 8)
+    manual_llm_screenshot_max_count: int = _env_int("MANUAL_LLM_SCREENSHOT_MAX_COUNT", 4)
+    manual_screenshot_width: int = _env_int("MANUAL_SCREENSHOT_WIDTH", 1280)
 
     llm_provider: str = os.getenv("LLM_PROVIDER", "ollama")
     llm_base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:11434").rstrip("/")
