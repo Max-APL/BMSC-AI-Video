@@ -16,4 +16,4 @@ imageio-ffmpeg>=0.5.1
 huggingface_hub>=0.23.0
 # llama-cpp-python requires CUDA build — install separately:
 # CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
-llama-cpp-python>=0.3.0
+# llama-cpp-python>=0.3.0
