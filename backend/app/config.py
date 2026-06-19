@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,26 +14,6 @@ try:
     load_dotenv(BASE_DIR / ".env")
 except ImportError:
     pass
-
-
-def _cuda_available() -> bool:
-    """Detect CUDA by probing the runtime library; no torch required."""
-    try:
-        ctypes.CDLL("libcuda.so.1")
-        return True
-    except OSError:
-        pass
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["nvidia-smi"], capture_output=True, timeout=5
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-_HAS_CUDA: bool = _cuda_available()
 
 
 def _env_int(name: str, default: int) -> int:
@@ -85,8 +64,8 @@ class Settings:
     ffmpeg_bin: str = os.getenv("FFMPEG_BIN", "ffmpeg").strip().strip("\"'")
 
     whisper_model: str = os.getenv("WHISPER_MODEL", "base")
-    whisper_device: str = os.getenv("WHISPER_DEVICE", "cuda" if _HAS_CUDA else "cpu")
-    whisper_compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "float16" if _HAS_CUDA else "int8")
+    whisper_device: str = os.getenv("WHISPER_DEVICE", "cpu")
+    whisper_compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
     whisper_language: Optional[str] = os.getenv("WHISPER_LANGUAGE") or None
     whisper_model_dir: Optional[Path] = _env_path("WHISPER_MODEL_DIR")
 
