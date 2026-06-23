@@ -380,6 +380,12 @@ class VideoService:
                     key_points_only=metadata.mode == ManualMode.llm,
                     min_gap_seconds=self.settings.manual_screenshot_min_gap_seconds,
                 )
+                log_event(
+                    "Manual screenshot targets selected "
+                    f"manual_id={manual_id} targets={len(screenshot_targets)} "
+                    f"limit={'auto' if screenshot_max_count <= 0 else screenshot_max_count}",
+                    video_id,
+                )
                 screenshots = extract_manual_screenshots(
                     video_path=self.storage.source_path(video),
                     output_dir=self.storage.manual_screenshots_dir(video_id, manual_id),

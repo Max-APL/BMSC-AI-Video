@@ -117,7 +117,7 @@ def build_screenshot_targets(
         for segment in segments
         if segment.text.strip()
     ]
-    minimum_score = 4 if key_points_only else 1
+    minimum_score = 2 if key_points_only else 1
     candidates = [
         (segment, score)
         for segment, score in scored_candidates
@@ -144,6 +144,13 @@ def build_screenshot_targets(
             minimum_score=minimum_score,
             min_gap_seconds=min_gap_seconds,
         )
+        if not selected_segments:
+            selected_segments = select_representative_segments_by_block(
+                scored_candidates,
+                parent_blocks,
+                max_count,
+                min_gap_seconds=min_gap_seconds,
+            )
     else:
         selected_segments = select_key_segments(
             candidates,
@@ -204,6 +211,12 @@ def score_visual_segment(text: str) -> int:
         "ruta",
         "directorio",
         "archivo",
+        "configuracion",
+        "configuración",
+        "dominio",
+        "servidor",
+        "server",
+        "cluster",
         "asistente",
         "wizard",
         "boton",
@@ -331,6 +344,69 @@ def select_key_segments_by_block(
             break
 
     return sorted(selected, key=lambda segment: segment.start_seconds)
+
+
+def select_representative_segments_by_block(
+    scored_segments: Sequence[tuple[TranscriptSegment, int]],
+    parent_blocks: Sequence[TranscriptBlock],
+    max_count: int,
+    *,
+    min_gap_seconds: int,
+) -> List[TranscriptSegment]:
+    if max_count < 0:
+        return []
+
+    items = [
+        (segment, score, find_parent_block_index(segment, parent_blocks))
+        for segment, score in scored_segments
+        if segment.text.strip()
+    ]
+    if not items:
+        return []
+
+    selected: List[TranscriptSegment] = []
+    selected_ids: set[int] = set()
+    coverage_blocks = select_blocks(list(parent_blocks), max_count)
+    for block in coverage_blocks:
+        block_items = [
+            item
+            for item in items
+            if item[2] == block.index
+        ]
+        if not block_items:
+            continue
+
+        segment, _score, _block_index = sorted(
+            block_items,
+            key=representative_segment_sort_key,
+        )[0]
+        if segment.id in selected_ids:
+            continue
+        if any(abs(segment.start_seconds - chosen.start_seconds) < min_gap_seconds for chosen in selected):
+            continue
+        selected.append(segment)
+        selected_ids.add(segment.id)
+        if max_count > 0 and len(selected) >= max_count:
+            break
+
+    if max_count > 0 and len(selected) < max_count:
+        ranked = sorted(items, key=representative_segment_sort_key)
+        for segment, _score, _block_index in ranked:
+            if segment.id in selected_ids:
+                continue
+            selected.append(segment)
+            selected_ids.add(segment.id)
+            if len(selected) >= max_count:
+                break
+
+    return sorted(selected, key=lambda segment: segment.start_seconds)
+
+
+def representative_segment_sort_key(item: tuple[TranscriptSegment, int, int]) -> tuple[int, int, float]:
+    segment, score, _block_index = item
+    normalized = clean_transcript_text(segment.text).lower()
+    action_bonus = 1 if any(normalized.startswith(pattern) for pattern in ACTION_PATTERNS) else 0
+    return (-score, -action_bonus, segment.start_seconds)
 
 
 def select_segments(segments: Sequence[TranscriptSegment], max_count: int) -> List[TranscriptSegment]:
