@@ -1,0 +1,130 @@
+/* Library layout (converted from inline styles) */
+.library-layout {
+  display: flex;
+  gap: 24px;
+  padding: 24px;
+  min-height: calc(100vh - 40px);
+}
+
+.library-filter-nav {
+  flex: 0 0 300px;
+  border-right: 1px solid var(--line);
+  padding-right: 24px;
+  overflow-y: auto;
+}
+
+.library-filter-header {
+  margin-bottom: 24px;
+}
+
+.library-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.library-filter-card {
+  margin-bottom: 16px;
+  cursor: pointer;
+}
+
+.library-filter-card.filter-active {
+  border-color: var(--green-700);
+}
+
+.subarea-active {
+  background: var(--green-100);
+  color: var(--green-900);
+  font-weight: bold;
+}
+
+.library-main-content {
+  flex: 1;
+  padding-left: 12px;
+  overflow-y: auto;
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+/* Library card with thumbnail layout */
+.library-card-media {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+}
+
+.library-card-thumb {
+  background-color: var(--surface-soft);
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  min-height: 100px;
+}
+
+.library-card-icon-wrap {
+  background: white;
+  padding: 12px;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.library-card-status-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.library-card-duration {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.library-card-body {
+  padding: 16px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.library-card-title {
+  margin: 0;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-900);
+}
+
+.library-card-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.library-card-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.library-card-open {
+  width: 100%;
+  justify-content: center;
+}

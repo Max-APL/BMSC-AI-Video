@@ -1,0 +1,13 @@
+.org-grid-mt {
+  margin-top: 24px;
+}
+
+.area-card-new {
+  background: var(--green-50);
+  border-style: dashed;
+  border-color: var(--green-700);
+}
+
+.area-card-new-title {
+  color: var(--green-900);
+}

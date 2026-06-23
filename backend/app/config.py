@@ -85,7 +85,6 @@ class Settings:
     manual_screenshot_width: int = _env_int("MANUAL_SCREENSHOT_WIDTH", 1280)
 
     llm_provider: str = os.getenv("LLM_PROVIDER", "llama_cpp")
-    llm_base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:11434").rstrip("/")
     llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")
     llm_model_path: Optional[Path] = _env_path("LLM_MODEL_PATH")
     llm_n_gpu_layers: int = _env_int("LLM_N_GPU_LAYERS", -1)

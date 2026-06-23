@@ -1,0 +1,32 @@
+/* Subarea selector (converted from inline styles) */
+.upload-subarea-selector {
+  padding: 0 22px;
+  margin-top: -10px;
+  margin-bottom: 10px;
+}
+
+.upload-subarea-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--ink-700);
+}
+
+.upload-subarea-select {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  width: 100%;
+  max-width: 300px;
+}
+
+.upload-restricted {
+  justify-content: center;
+  text-align: center;
+}
+
+.history-row-actions {
+  display: flex;
+  gap: 8px;
+}

@@ -368,6 +368,9 @@ def ask_video(video_id: str, request: AnswerRequest, current_user: DBUser = Depe
             question=request.question,
             top_k=request.top_k,
             min_score=request.min_score,
+            mode=request.mode,
+            provider=request.provider,
+            model=request.model,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc

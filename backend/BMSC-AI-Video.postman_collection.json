@@ -308,7 +308,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"mode\": \"llm\",\n  \"format\": \"markdown\",\n  \"provider\": \"ollama\",\n  \"model\": \"llama3.1:8b\",\n  \"include_timestamps\": true,\n  \"include_screenshots\": true\n}"
+          "raw": "{\n  \"mode\": \"llm\",\n  \"format\": \"markdown\",\n  \"provider\": \"llama_cpp\",\n  \"include_timestamps\": true,\n  \"include_screenshots\": true\n}"
         },
         "url": {
           "raw": "{{base_url}}/videos/{{video_id}}/manuals",
@@ -321,7 +321,7 @@
             "manuals"
           ]
         },
-        "description": "Genera un manual redactado por LLM local via Ollama. Requiere Ollama corriendo y llama3.1:8b descargado."
+        "description": "Genera un manual redactado por LLM local via llama.cpp. Requiere llama-cpp-python instalado y un modelo GGUF disponible o descargable."
       }
     },
     {

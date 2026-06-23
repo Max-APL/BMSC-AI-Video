@@ -179,13 +179,7 @@ def build_llm_manual(
         chunk_seconds=settings.manual_llm_chunk_seconds,
         max_chars=settings.manual_llm_chunk_max_chars,
     )
-    client: Any = LlamaCppClient(
-        model_path=settings.llm_model_path,
-        n_ctx=settings.llm_num_ctx,
-        n_gpu_layers=settings.llm_n_gpu_layers,
-        temperature=settings.llm_temperature,
-        terminology_hints=settings.manual_terminology_hints,
-    )
+    client = get_llm_client(provider=provider, model=model, settings=settings)
     title = manual_title(metadata)
     lines = build_manual_front_matter(
         metadata,
@@ -476,28 +470,50 @@ Secciones generadas:
             )
             content = response["choices"][0]["message"]["content"] or ""
             if not content:
-                raise RuntimeError("llama-cpp-python no devolvio contenido para el manual.")
-            return content
-        else:
-            parts: List[str] = []
-            stream = llm.create_chat_completion(
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=4096,
-                stream=True,
-            )
-            for chunk in stream:
-                delta = chunk["choices"][0]["delta"].get("content") or ""
-                if delta:
-                    parts.append(delta)
-                    on_delta("".join(parts), delta)
-            content = "".join(parts).strip()
-            if not content:
-                raise RuntimeError("llama-cpp-python no devolvio contenido para el manual.")
+                raise RuntimeError("llama-cpp-python no devolvio contenido.")
             return content
 
+        parts: List[str] = []
+        stream = llm.create_chat_completion(
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=4096,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk["choices"][0]["delta"].get("content") or ""
+            if delta:
+                parts.append(delta)
+                on_delta("".join(parts), delta)
+        content = "".join(parts).strip()
+        if not content:
+            raise RuntimeError("llama-cpp-python no devolvio contenido.")
+        return content
 
 
+def normalize_llm_provider(provider: Optional[str]) -> str:
+    normalized = (provider or "llama_cpp").strip().lower().replace("-", "_")
+    aliases = {
+        "llamacpp": "llama_cpp",
+        "llama.cpp": "llama_cpp",
+        "llama_cpp": "llama_cpp",
+    }
+    if normalized not in aliases:
+        raise RuntimeError(
+            f"Proveedor LLM no soportado: {provider}. Usa 'llama_cpp'."
+        )
+    return aliases[normalized]
+
+
+def get_llm_client(*, provider: str, model: str, settings: Settings) -> Any:
+    normalize_llm_provider(provider)
+    return LlamaCppClient(
+        model_path=settings.llm_model_path,
+        n_ctx=settings.llm_num_ctx,
+        n_gpu_layers=settings.llm_n_gpu_layers,
+        temperature=settings.llm_temperature,
+        terminology_hints=settings.manual_terminology_hints,
+    )
 
 def build_time_blocks(
     segments: List[TranscriptSegment],

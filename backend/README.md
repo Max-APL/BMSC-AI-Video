@@ -120,22 +120,25 @@ La respuesta incluye `answer`, `confidence` y `matches`. Cada elemento de `match
 - `start_timecode` / `end_timecode`: ubicacion exacta en el video
 - `text`: fragmento encontrado
 
-5. Preguntar al video con respuesta extractiva:
+5. Preguntar al video con respuesta redactada por LLM local:
 
 ```powershell
 curl.exe -X POST "http://localhost:8000/videos/{video_id}/ask" `
   -H "Content-Type: application/json" `
-  -d "{\"question\":\"desde donde descargo la app de banca movil?\", \"top_k\":3, \"min_score\":0.0}"
+  -d "{\"question\":\"desde donde descargo la app de banca movil?\", \"top_k\":3, \"min_score\":0.0, \"mode\":\"llm\"}"
 ```
 
-Este endpoint no usa LLM. Recupera los fragmentos mas relevantes y arma una respuesta tipo bot, citando el rango del video:
+Este endpoint recupera los fragmentos mas relevantes y, por defecto, pide al LLM local que redacte la respuesta usando solo esas fuentes. Si el modelo no esta disponible, devuelve una respuesta extractiva de respaldo con `fallback_reason`.
 
 ```json
 {
-  "answer": "Se habla de esto entre 00:00:29.870 y 00:00:38.350. Según el video: Primero, descarga...",
+  "mode": "llm",
+  "answer": "La aplicacion se descarga o actualiza desde la tienda de aplicaciones, como se indica entre 00:00:29.870 y 00:00:38.350.",
   "sources": [...]
 }
 ```
+
+Para forzar el comportamiento anterior sin LLM, envia `"mode":"extractive"`.
 
 Para resultados mas precisos, los chunks de busqueda son cortos por defecto:
 

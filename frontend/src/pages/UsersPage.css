@@ -1,0 +1,45 @@
+.organization-page {
+  display: grid;
+  gap: 18px;
+}
+
+.user-create-card {
+  grid-column: 1 / -1;
+  max-width: 600px;
+}
+
+.user-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-role-select {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+.user-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.user-card-email {
+  margin: 0;
+  word-break: break-all;
+}
+
+.user-card-role {
+  margin-top: 12px;
+}
+
+.user-role-badge {
+  font-size: 12px;
+  background: var(--surface-soft);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: bold;
+}

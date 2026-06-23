@@ -7,3 +7,17 @@ storage/*
 !storage/.gitkeep
 models/
 .claude/
+
+# Logs
+*.log
+
+# Type checkers / linters cache
+.mypy_cache/
+.ruff_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# OS
+.DS_Store

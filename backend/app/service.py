@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple
 
 from fastapi import UploadFile
 
-from .answering import build_extractive_answer
+from .answering import build_extractive_answer, build_llm_answer
 from .chunking import build_search_chunks
 from .config import Settings
 from .debug import log_event
@@ -26,6 +26,7 @@ from .manual_generation import (
 )
 from .models import (
     AnswerResponse,
+    AnswerMode,
     ManualMetadata,
     ManualMode,
     ManualRequest,
@@ -613,6 +614,9 @@ class VideoService:
         question: str,
         top_k: int,
         min_score: float,
+        mode: AnswerMode = AnswerMode.llm,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> AnswerResponse:
         query_response = self.query_video(
             video_id=video_id,
@@ -620,11 +624,34 @@ class VideoService:
             top_k=top_k,
             min_score=min_score,
         )
-        return build_extractive_answer(
-            video_id=video_id,
-            question=question,
-            matches=query_response.matches,
-        )
+        resolved_provider = provider or self.settings.llm_provider
+        resolved_model = model or self.settings.llm_model
+        if mode == AnswerMode.extractive:
+            return build_extractive_answer(
+                video_id=video_id,
+                question=question,
+                matches=query_response.matches,
+            )
+
+        try:
+            return build_llm_answer(
+                video_id=video_id,
+                question=question,
+                matches=query_response.matches,
+                settings=self.settings,
+                provider=resolved_provider,
+                model=resolved_model,
+            )
+        except Exception as exc:
+            log_event(f"LLM answer failed; falling back to extractive error={exc}", video_id)
+            return build_extractive_answer(
+                video_id=video_id,
+                question=question,
+                matches=query_response.matches,
+                provider=resolved_provider,
+                model=resolved_model,
+                fallback_reason=str(exc),
+            )
 
     def reindex_video(self, video_id: str) -> VideoMetadata:
         metadata = self.storage.load_metadata(video_id)

@@ -1,2 +1,25 @@
 node_modules/
 dist/
+dist-ssr/
+
+# Local env files
+.env
+.env.*
+!.env.example
+*.local
+
+# Vite cache
+.vite/
+
+# Coverage / test output
+coverage/
+
+# Logs
+npm-debug.log*
+*.log
+
+# OS
+.DS_Store
+
+# TypeScript build info
+*.tsbuildinfo
