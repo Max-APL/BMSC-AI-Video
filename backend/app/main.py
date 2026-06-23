@@ -118,7 +118,9 @@ def recover_interrupted_processing() -> None:
         f"storage_dir={settings.storage_dir} "
         f"whisper_model={settings.whisper_model} "
         f"device={settings.whisper_device} "
-        f"compute_type={settings.whisper_compute_type}"
+        f"compute_type={settings.whisper_compute_type} "
+        f"audio_chunk_seconds={settings.whisper_audio_chunk_seconds} "
+        f"beam_size={settings.whisper_beam_size}"
     )
     recovered = service.recover_interrupted_processing()
     log_event(f"Interrupted processing recovery complete recovered={recovered}")

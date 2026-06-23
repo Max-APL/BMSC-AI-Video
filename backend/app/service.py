@@ -635,6 +635,8 @@ class VideoService:
             whisper_model=self.settings.whisper_model,
             whisper_device=self.settings.whisper_device,
             whisper_compute_type=self.settings.whisper_compute_type,
+            whisper_audio_chunk_seconds=self.settings.whisper_audio_chunk_seconds,
+            whisper_beam_size=self.settings.whisper_beam_size,
         )
 
     def recover_interrupted_processing(self) -> int:

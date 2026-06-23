@@ -68,6 +68,8 @@ class Settings:
     whisper_compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
     whisper_language: Optional[str] = os.getenv("WHISPER_LANGUAGE") or None
     whisper_model_dir: Optional[Path] = _env_path("WHISPER_MODEL_DIR")
+    whisper_audio_chunk_seconds: int = _env_int("WHISPER_AUDIO_CHUNK_SECONDS", 300)
+    whisper_beam_size: int = _env_int("WHISPER_BEAM_SIZE", 5)
 
     search_chunk_seconds: int = _env_int("SEARCH_CHUNK_SECONDS", 14)
     search_chunk_max_chars: int = _env_int("SEARCH_CHUNK_MAX_CHARS", 320)

@@ -20,6 +20,15 @@ copy .env.example .env
 
 El primer procesamiento puede descargar el modelo configurado en `WHISPER_MODEL` si no existe localmente. Para un prototipo rapido en CPU, `base` + `int8` es un buen punto de partida. Para mayor calidad, usa `small` o `medium`, asumiendo mas tiempo de procesamiento.
 
+Para evitar picos de memoria con videos largos, el backend parte el audio extraido en chunks temporales antes de enviarlo a Whisper. El valor por defecto procesa bloques de 5 minutos:
+
+```env
+WHISPER_AUDIO_CHUNK_SECONDS=300
+WHISPER_BEAM_SIZE=5
+```
+
+Si el servidor esta muy ajustado de memoria, baja `WHISPER_AUDIO_CHUNK_SECONDS` a `180` o `120`. Si necesitas reducir aun mas el consumo durante decodificacion, puedes bajar `WHISPER_BEAM_SIZE` a `1` a cambio de algo menos de precision.
+
 Si `ffmpeg` no esta en PATH, el backend intenta transcribir directamente el archivo original con `faster-whisper`/PyAV. Tener `ffmpeg` instalado sigue siendo recomendable porque genera un `audio.wav` normalizado y hace el flujo mas predecible con videos largos.
 
 Si tu terminal ve `ffmpeg` pero el backend no, configura la ruta exacta en `.env`:

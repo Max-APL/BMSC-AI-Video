@@ -204,3 +204,5 @@ class SystemDependenciesResponse(BaseModel):
     whisper_model: str
     whisper_device: str
     whisper_compute_type: str
+    whisper_audio_chunk_seconds: int
+    whisper_beam_size: int
