@@ -136,3 +136,24 @@ def test_build_screenshot_targets_detects_generic_training_visual_cues():
     )
 
     assert [target.start_seconds for target in targets] == [10, 90]
+
+
+def test_build_screenshot_targets_falls_back_to_representative_blocks_when_visual_cues_are_missing():
+    segments = [
+        make_segment(0, 10, 20, "La arquitectura del servicio se compone de una capa de acceso."),
+        make_segment(1, 70, 80, "La comunicacion interna mantiene una separacion por componentes."),
+        make_segment(2, 330, 340, "El segundo modulo concentra las reglas de negocio."),
+        make_segment(3, 390, 400, "La operacion finaliza con la revision del resultado."),
+    ]
+    blocks = build_text_blocks(segments, chunk_seconds=300, max_chars=7000)
+
+    targets = build_screenshot_targets(
+        segments=segments,
+        parent_blocks=blocks,
+        max_count=0,
+        key_points_only=True,
+        min_gap_seconds=45,
+    )
+
+    assert [target.index for target in targets] == [1, 2]
+    assert [target.start_seconds for target in targets] == [10, 330]
