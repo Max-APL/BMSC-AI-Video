@@ -84,8 +84,10 @@ def extract_manual_screenshots(
 
 
 def select_blocks(blocks: List[TranscriptBlock], max_count: int) -> List[TranscriptBlock]:
-    if max_count <= 0 or not blocks:
+    if not blocks:
         return []
+    if max_count <= 0:
+        return blocks
     if len(blocks) <= max_count:
         return blocks
     if max_count == 1:
@@ -105,8 +107,9 @@ def build_screenshot_targets(
     parent_blocks: Sequence[TranscriptBlock],
     max_count: int,
     key_points_only: bool = False,
+    min_gap_seconds: int = 45,
 ) -> List[TranscriptBlock]:
-    if max_count <= 0:
+    if max_count < 0:
         return []
 
     scored_candidates = [
@@ -133,7 +136,20 @@ def build_screenshot_targets(
             if segment.text.strip()
         ]
 
-    selected_segments = select_key_segments(candidates, max_count)
+    if key_points_only and parent_blocks:
+        selected_segments = select_key_segments_by_block(
+            scored_candidates,
+            parent_blocks,
+            max_count,
+            minimum_score=minimum_score,
+            min_gap_seconds=min_gap_seconds,
+        )
+    else:
+        selected_segments = select_key_segments(
+            candidates,
+            max_count,
+            min_gap_seconds=min_gap_seconds,
+        )
     return [
         segment_to_target(segment, parent_blocks)
         for segment in selected_segments
@@ -147,12 +163,49 @@ def score_visual_segment(text: str) -> int:
 
     score = 0
     starts_with_action = any(normalized.startswith(pattern) for pattern in ACTION_PATTERNS)
+    starts_with_visual_cue = normalized.startswith(
+        (
+            "vamos a ver",
+            "veamos",
+            "vemos",
+            "aqui",
+            "aquí",
+            "aca",
+            "acá",
+            "en pantalla",
+            "en esta pantalla",
+            "en la pantalla",
+            "desde la consola",
+        )
+    )
     if starts_with_action and not normalized.startswith(("recuerda", "debe")):
+        score += 2
+    if starts_with_visual_cue:
         score += 2
     if normalized.startswith(("aparecera", "aparecerá", "se mostrara", "se mostrará", "se enviara", "se enviará")):
         score += 2
     visual_terms = (
         "pantalla",
+        "ventana",
+        "consola",
+        "menu",
+        "menú",
+        "pestana",
+        "pestaña",
+        "panel",
+        "formulario",
+        "tabla",
+        "lista",
+        "diagrama",
+        "diapositiva",
+        "slide",
+        "presentacion",
+        "presentación",
+        "ruta",
+        "directorio",
+        "archivo",
+        "asistente",
+        "wizard",
         "boton",
         "botón",
         "opcion",
@@ -178,7 +231,7 @@ def score_visual_segment(text: str) -> int:
     has_visual_term = any(term in normalized for term in visual_terms)
     if has_visual_term:
         score += 2
-    if starts_with_action and has_visual_term:
+    if (starts_with_action or starts_with_visual_cue) and has_visual_term:
         score += 1
     return score
 
@@ -186,9 +239,11 @@ def score_visual_segment(text: str) -> int:
 def select_key_segments(
     scored_segments: Sequence[tuple[TranscriptSegment, int]],
     max_count: int,
+    *,
+    min_gap_seconds: int,
 ) -> List[TranscriptSegment]:
     items = list(scored_segments)
-    if len(items) <= max_count:
+    if max_count > 0 and len(items) <= max_count:
         return [segment for segment, _score in sorted(items, key=lambda item: item[0].start_seconds)]
 
     ranked = sorted(
@@ -196,19 +251,84 @@ def select_key_segments(
         key=lambda item: (-item[1], item[0].start_seconds),
     )
     selected: List[TranscriptSegment] = []
-    min_gap_seconds = 18
     for segment, _score in ranked:
         if all(abs(segment.start_seconds - chosen.start_seconds) >= min_gap_seconds for chosen in selected):
             selected.append(segment)
-        if len(selected) >= max_count:
+        if max_count > 0 and len(selected) >= max_count:
             break
 
-    if len(selected) < max_count:
+    if max_count > 0 and len(selected) < max_count:
         for segment, _score in ranked:
             if segment not in selected:
                 selected.append(segment)
             if len(selected) >= max_count:
                 break
+
+    return sorted(selected, key=lambda segment: segment.start_seconds)
+
+
+def select_key_segments_by_block(
+    scored_segments: Sequence[tuple[TranscriptSegment, int]],
+    parent_blocks: Sequence[TranscriptBlock],
+    max_count: int,
+    *,
+    minimum_score: int,
+    min_gap_seconds: int,
+) -> List[TranscriptSegment]:
+    if max_count < 0:
+        return []
+
+    items = [
+        (segment, score, find_parent_block_index(segment, parent_blocks))
+        for segment, score in scored_segments
+        if segment.text.strip()
+    ]
+    if not items:
+        return []
+
+    strict_items = [
+        item
+        for item in items
+        if item[1] >= minimum_score
+    ]
+    if not strict_items:
+        return []
+
+    selected: List[TranscriptSegment] = []
+    selected_ids: set[int] = set()
+    coverage_blocks = select_blocks(list(parent_blocks), max_count)
+    for block in coverage_blocks:
+        block_items = [
+            item
+            for item in strict_items
+            if item[2] == block.index
+        ]
+        if not block_items:
+            continue
+
+        segment, _score, _block_index = sorted(
+            block_items,
+            key=lambda item: (-item[1], item[0].start_seconds),
+        )[0]
+        if segment.id not in selected_ids:
+            selected.append(segment)
+            selected_ids.add(segment.id)
+        if max_count > 0 and len(selected) >= max_count:
+            return sorted(selected, key=lambda segment: segment.start_seconds)
+
+    ranked = sorted(
+        strict_items,
+        key=lambda item: (-item[1], item[0].start_seconds),
+    )
+    for segment, _score, _block_index in ranked:
+        if segment.id in selected_ids:
+            continue
+        if any(abs(segment.start_seconds - chosen.start_seconds) < min_gap_seconds for chosen in selected):
+            continue
+        selected.append(segment)
+        selected_ids.add(segment.id)
+        if max_count > 0 and len(selected) >= max_count:
+            break
 
     return sorted(selected, key=lambda segment: segment.start_seconds)
 

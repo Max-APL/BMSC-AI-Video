@@ -79,8 +79,9 @@ class Settings:
     manual_llm_chunk_max_chars: int = _env_int("MANUAL_LLM_CHUNK_MAX_CHARS", 7000)
     manual_terminology_hints: str = os.getenv("MANUAL_TERMINOLOGY_HINTS", "").strip()
     manual_screenshot_offset_seconds: int = _env_int("MANUAL_SCREENSHOT_OFFSET_SECONDS", 2)
-    manual_screenshot_max_count: int = _env_int("MANUAL_SCREENSHOT_MAX_COUNT", 8)
-    manual_llm_screenshot_max_count: int = _env_int("MANUAL_LLM_SCREENSHOT_MAX_COUNT", 4)
+    manual_screenshot_min_gap_seconds: int = _env_int("MANUAL_SCREENSHOT_MIN_GAP_SECONDS", 45)
+    manual_screenshot_max_count: int = _env_int("MANUAL_SCREENSHOT_MAX_COUNT", 0)
+    manual_llm_screenshot_max_count: int = _env_int("MANUAL_LLM_SCREENSHOT_MAX_COUNT", 0)
     manual_screenshot_width: int = _env_int("MANUAL_SCREENSHOT_WIDTH", 1280)
 
     llm_provider: str = os.getenv("LLM_PROVIDER", "llama_cpp")

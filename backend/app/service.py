@@ -369,16 +369,16 @@ class VideoService:
                     if metadata.mode == ManualMode.llm
                     else build_time_blocks(segments, chunk_seconds=self.settings.manual_chunk_seconds)
                 )
-                screenshot_max_count = (
-                    self.settings.manual_llm_screenshot_max_count
-                    if metadata.mode == ManualMode.llm
-                    else self.settings.manual_screenshot_max_count
+                screenshot_max_count = self.resolve_manual_screenshot_max_count(
+                    metadata.mode,
+                    manual_blocks,
                 )
                 screenshot_targets = build_screenshot_targets(
                     segments=segments,
                     parent_blocks=manual_blocks,
                     max_count=screenshot_max_count,
                     key_points_only=metadata.mode == ManualMode.llm,
+                    min_gap_seconds=self.settings.manual_screenshot_min_gap_seconds,
                 )
                 screenshots = extract_manual_screenshots(
                     video_path=self.storage.source_path(video),
@@ -500,6 +500,24 @@ class VideoService:
                 processing_stage="failed",
                 error=str(exc),
             )
+
+    def resolve_manual_screenshot_max_count(
+        self,
+        mode: ManualMode,
+        manual_blocks: List,
+    ) -> int:
+        if not manual_blocks:
+            return 0
+        if mode == ManualMode.llm:
+            configured_limit = self.settings.manual_llm_screenshot_max_count
+            if configured_limit > 0:
+                return configured_limit
+            return 0
+
+        configured_limit = self.settings.manual_screenshot_max_count
+        if configured_limit > 0:
+            return configured_limit
+        return 0
 
     def list_manuals(self, video_id: str) -> List[ManualMetadata]:
         self.storage.load_metadata(video_id)
