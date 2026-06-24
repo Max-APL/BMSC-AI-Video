@@ -279,7 +279,7 @@
             "manuals"
           ]
         },
-        "description": "Genera un manual profesional redactado por el LLM local configurado en el backend. Guarda manual_id como variable de coleccion."
+        "description": "Genera un manual profesional redactado por el LLM local configurado en el backend via llama.cpp. Requiere llama-cpp-python instalado y un modelo GGUF disponible o descargable. Guarda manual_id como variable de coleccion."
       }
     },
     {

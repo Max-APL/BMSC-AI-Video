@@ -121,7 +121,14 @@ def recover_interrupted_processing() -> None:
         f"device={settings.whisper_device} "
         f"compute_type={settings.whisper_compute_type} "
         f"audio_chunk_seconds={settings.whisper_audio_chunk_seconds} "
-        f"beam_size={settings.whisper_beam_size}"
+        f"beam_size={settings.whisper_beam_size} "
+        f"best_of={settings.whisper_best_of} "
+        f"whisper_cpu_threads={settings.whisper_cpu_threads} "
+        f"whisper_num_workers={settings.whisper_num_workers} "
+        f"whisper_chunk_workers={settings.whisper_chunk_workers} "
+        f"llm_ctx={settings.llm_num_ctx} "
+        f"llm_threads={settings.llm_n_threads or 'auto'} "
+        f"llm_batch={settings.llm_n_batch}"
     )
     recovered = service.recover_interrupted_processing()
     log_event(f"Interrupted processing recovery complete recovered={recovered}")
@@ -386,6 +393,9 @@ def ask_video(video_id: str, request: AnswerRequest, current_user: DBUser = Depe
             question=request.question,
             top_k=request.top_k,
             min_score=request.min_score,
+            mode=request.mode,
+            provider=request.provider,
+            model=request.model,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc

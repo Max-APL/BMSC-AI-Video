@@ -1,0 +1,5 @@
+/* VideoPlayer styles extracted from global for co-location reference.
+   The actual CSS rules live in styles/global.css; this file documents which
+   classes belong to this component: .player-surface, .player-header,
+   .context-player, .video-first-player, .video-frame, .player-note,
+   .inline-warning */

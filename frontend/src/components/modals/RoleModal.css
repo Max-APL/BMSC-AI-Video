@@ -1,0 +1,72 @@
+/* Role modal overrides: wider content + form layout */
+.role-modal-content {
+  max-width: 640px;
+}
+
+.role-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.role-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role-field-label {
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--ink-700);
+}
+
+.role-name-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  outline: none;
+  font-size: 14px;
+  transition: border 0.2s;
+}
+
+.role-name-input:focus {
+  border-color: var(--green-700);
+}
+
+.role-section-label {
+  display: block;
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--ink-700);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+  margin-bottom: 16px;
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.toggle-subtitle {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.role-modal-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.modal-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 0 0 12px;
+}

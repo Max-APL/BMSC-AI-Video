@@ -5,6 +5,7 @@ import subprocess
 import time
 import uuid
 import wave
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Callable, Dict, List, Optional, Tuple
@@ -199,7 +200,10 @@ class FasterWhisperTranscriber:
                 "Loading faster-whisper model "
                 f"model={self.settings.whisper_model} "
                 f"device={device} "
-                f"compute_type={compute_type}"
+                f"compute_type={compute_type} "
+                f"cpu_threads={self.settings.whisper_cpu_threads} "
+                f"num_workers={self.settings.whisper_num_workers} "
+                f"chunk_workers={self.settings.whisper_chunk_workers}"
             )
             try:
                 from faster_whisper import WhisperModel
@@ -208,7 +212,12 @@ class FasterWhisperTranscriber:
                     "faster-whisper no esta instalado. Ejecuta pip install -r requirements.txt."
                 ) from exc
 
-            kwargs: dict = {"device": device, "compute_type": compute_type}
+            kwargs: dict = {
+                "device": device,
+                "compute_type": compute_type,
+                "cpu_threads": self.settings.whisper_cpu_threads,
+                "num_workers": self.settings.whisper_num_workers,
+            }
             if self.settings.whisper_model_dir:
                 kwargs["download_root"] = str(self.settings.whisper_model_dir)
 
@@ -293,10 +302,14 @@ class FasterWhisperTranscriber:
                 heartbeat_thread.join(timeout=1)
 
             elapsed = round(time.monotonic() - started_at, 1)
+            realtime_factor = None
+            if duration and duration > 0:
+                realtime_factor = round(elapsed / float(duration), 3)
             log_event(
                 "Whisper transcription finished "
                 f"elapsed={elapsed}s segments={len(segments)} "
-                f"language={language} duration={duration}",
+                f"language={language} duration={duration} "
+                f"realtime_factor={realtime_factor}",
                 video_id,
             )
             return segments, language, duration
@@ -320,9 +333,23 @@ class FasterWhisperTranscriber:
             "Whisper file chunking enabled "
             f"duration={duration_seconds}s "
             f"chunk_seconds={chunk_seconds} "
-            f"chunks={len(ranges)}",
+            f"chunks={len(ranges)} "
+            f"chunk_workers={self.settings.whisper_chunk_workers}",
             video_id,
         )
+
+        if self.settings.whisper_chunk_workers > 1 and len(ranges) > 1:
+            return self._transcribe_chunked_wav_parallel(
+                model=model,
+                audio_path=audio_path,
+                duration_seconds=duration_seconds,
+                ranges=ranges,
+                chunk_dir=chunk_dir,
+                segments=segments,
+                progress_state=progress_state,
+                on_segment=on_segment,
+                video_id=video_id,
+            )
 
         try:
             for chunk_index, start_seconds, length_seconds in ranges:
@@ -364,6 +391,89 @@ class FasterWhisperTranscriber:
 
         return language, duration_seconds
 
+    def _transcribe_chunked_wav_parallel(
+        self,
+        model,
+        audio_path: Path,
+        duration_seconds: float,
+        ranges: List[Tuple[int, float, float]],
+        chunk_dir: Path,
+        segments: List[TranscriptSegment],
+        progress_state: Dict[str, object],
+        on_segment: Optional[Callable[[TranscriptSegment], None]],
+        video_id: Optional[str],
+    ) -> Tuple[Optional[str], float]:
+        worker_count = max(1, min(self.settings.whisper_chunk_workers, len(ranges)))
+        log_event(
+            "Whisper parallel chunk transcription enabled "
+            f"workers={worker_count}",
+            video_id,
+        )
+        try:
+            chunk_jobs = []
+            for chunk_index, start_seconds, length_seconds in ranges:
+                chunk_path = chunk_dir / f"chunk_{chunk_index:05d}.wav"
+                log_event(
+                    "Preparing Whisper audio chunk "
+                    f"index={chunk_index + 1}/{len(ranges)} "
+                    f"start={format_timecode(start_seconds)} "
+                    f"duration={length_seconds}s",
+                    video_id,
+                )
+                extract_audio_chunk(
+                    audio_path=audio_path,
+                    chunk_path=chunk_path,
+                    start_seconds=start_seconds,
+                    duration_seconds=length_seconds,
+                    ffmpeg_bin=self.settings.ffmpeg_bin,
+                )
+                chunk_jobs.append((chunk_index, start_seconds, length_seconds, chunk_path))
+
+            completed_chunks: Dict[int, Tuple[Optional[str], List[TranscriptSegment]]] = {}
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(
+                        self._transcribe_file_to_segments,
+                        model,
+                        chunk_path,
+                        start_seconds,
+                        video_id,
+                    ): (chunk_index, start_seconds, length_seconds, chunk_path)
+                    for chunk_index, start_seconds, length_seconds, chunk_path in chunk_jobs
+                }
+                for future in as_completed(futures):
+                    chunk_index, start_seconds, length_seconds, chunk_path = futures[future]
+                    language, chunk_segments = future.result()
+                    completed_chunks[chunk_index] = (language, chunk_segments)
+                    completed_seconds = min(duration_seconds, start_seconds + length_seconds)
+                    progress_state["last_timecode"] = format_timecode(completed_seconds)
+                    log_event(
+                        "Whisper audio chunk transcribed "
+                        f"index={chunk_index + 1}/{len(ranges)} "
+                        f"segments={len(chunk_segments)}",
+                        video_id,
+                    )
+                    try:
+                        chunk_path.unlink()
+                    except OSError:
+                        pass
+
+            language: Optional[str] = None
+            for chunk_index, _start_seconds, _length_seconds in ranges:
+                chunk_language, chunk_segments = completed_chunks.get(chunk_index, (None, []))
+                if language is None:
+                    language = chunk_language
+                for segment in chunk_segments:
+                    segment.id = len(segments)
+                    segments.append(segment)
+                    progress_state["segments"] = len(segments)
+                    progress_state["last_timecode"] = segment.end_timecode
+                    if on_segment:
+                        on_segment(segment)
+            return language, duration_seconds
+        finally:
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+
     def _transcribe_file(
         self,
         model,
@@ -378,7 +488,10 @@ class FasterWhisperTranscriber:
             "Starting faster-whisper transcription call "
             f"audio={audio_path} "
             f"offset={format_timecode(offset_seconds)} "
-            f"beam_size={self.settings.whisper_beam_size}",
+            f"beam_size={self.settings.whisper_beam_size} "
+            f"best_of={self.settings.whisper_best_of} "
+            f"temperature={self.settings.whisper_temperature} "
+            f"condition_on_previous_text={self.settings.whisper_condition_on_previous_text}",
             video_id,
         )
         segments_iterator, info = model.transcribe(
@@ -386,6 +499,9 @@ class FasterWhisperTranscriber:
             language=self.settings.whisper_language,
             vad_filter=True,
             beam_size=self.settings.whisper_beam_size,
+            best_of=self.settings.whisper_best_of,
+            temperature=self.settings.whisper_temperature,
+            condition_on_previous_text=self.settings.whisper_condition_on_previous_text,
         )
         log_event("Faster-whisper returned segment iterator; consuming segments", video_id)
 
@@ -419,3 +535,23 @@ class FasterWhisperTranscriber:
                 on_segment(transcript_segment)
 
         return info
+
+    def _transcribe_file_to_segments(
+        self,
+        model,
+        audio_path: Path,
+        offset_seconds: float,
+        video_id: Optional[str],
+    ) -> Tuple[Optional[str], List[TranscriptSegment]]:
+        local_segments: List[TranscriptSegment] = []
+        progress_state: Dict[str, object] = {"segments": 0, "last_timecode": format_timecode(offset_seconds)}
+        info = self._transcribe_file(
+            model=model,
+            audio_path=audio_path,
+            offset_seconds=offset_seconds,
+            segments=local_segments,
+            progress_state=progress_state,
+            on_segment=None,
+            video_id=video_id,
+        )
+        return getattr(info, "language", None), local_segments

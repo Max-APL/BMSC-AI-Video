@@ -1,0 +1,97 @@
+.roles-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.roles-title {
+  margin: 0;
+  color: var(--green-950);
+}
+
+.roles-subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.role-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.role-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.role-card-name h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink-900);
+}
+
+.role-access-badge {
+  font-size: 10px;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-weight: bold;
+}
+
+.role-access-badge.global {
+  background: var(--green-700);
+}
+
+.role-access-badge.area {
+  background: var(--gold-600);
+}
+
+.role-edit-btn {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+}
+
+.role-section-micro-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: bold;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.role-chip-area {
+  background: var(--green-50);
+  border-color: var(--green-100);
+  color: var(--green-800);
+}
+
+.role-no-perms {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.role-areas-section {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
