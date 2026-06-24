@@ -8,6 +8,36 @@ import {
   manualAssetsUrl,
 } from "@/services/manuals";
 
+const GENERATING_STATUSES = new Set(["processing", "queued"]);
+
+function sortManuals(manuals) {
+  return [...manuals].sort(
+    (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
+  );
+}
+
+function upsertManual(manuals, manual) {
+  if (!manual) return manuals;
+  const exists = manuals.some((item) => item.id === manual.id);
+  const next = exists
+    ? manuals.map((item) => (item.id === manual.id ? { ...item, ...manual } : item))
+    : [manual, ...manuals];
+  return sortManuals(next);
+}
+
+function mergeManualsWithActiveState(serverManuals, previousManuals, activeManual) {
+  let next = sortManuals(serverManuals);
+  const preserveIfMissing = (manual) => {
+    if (!manual || !GENERATING_STATUSES.has(manual.status)) return;
+    if (next.some((item) => item.id === manual.id)) return;
+    next = upsertManual(next, manual);
+  };
+
+  previousManuals.forEach(preserveIfMissing);
+  preserveIfMissing(activeManual);
+  return next;
+}
+
 /**
  * Manages manual state for a given video: list, polling, preview,
  * and CRUD handlers.
@@ -24,16 +54,20 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
       if (!videoId) return;
       try {
         const data = await listManuals(videoId);
-        setManuals(
-          [...data].sort(
-            (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
-          )
-        );
+        setManuals((prev) => {
+          return mergeManualsWithActiveState(data, prev, manualPreview?.metadata);
+        });
       } catch (err) {
         if (!silent && setError) setError(err.message);
       }
     },
-    [videoId, setError]
+    [
+      videoId,
+      manualPreview?.metadata?.id,
+      manualPreview?.metadata?.status,
+      manualPreview?.metadata?.progress,
+      setError,
+    ]
   );
 
   // Initial load & reset when videoId changes
@@ -59,7 +93,7 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
 
     const trackedId =
       manualPreview?.metadata?.id ??
-      manuals.find((m) => m.status === "processing" || m.status === "queued")?.id;
+      manuals.find((m) => GENERATING_STATUSES.has(m.status))?.id;
     if (!trackedId) return;
 
     const listEntry = manuals.find((m) => m.id === trackedId);
@@ -67,8 +101,8 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     const previewProgress = manualPreview?.metadata?.progress;
 
     const isGenerating = listEntry
-      ? listEntry.status === "processing" || listEntry.status === "queued"
-      : previewStatus === "processing" || previewStatus === "queued";
+      ? GENERATING_STATUSES.has(listEntry.status)
+      : GENERATING_STATUSES.has(previewStatus);
     const statusChanged = listEntry && listEntry.status !== previewStatus;
     const progressChanged = listEntry && listEntry.progress !== previewProgress;
 
@@ -77,7 +111,10 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     let cancelled = false;
     getManual(videoId, trackedId, true)
       .then((data) => {
-        if (!cancelled) setManualPreview(data);
+        if (!cancelled) {
+          setManualPreview(data);
+          setManuals((prev) => upsertManual(prev, data.metadata));
+        }
       })
       .catch((err) => {
         console.error("manual preview refresh failed", err);
@@ -92,7 +129,32 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [manuals, videoId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [manuals, videoId, manualPreview?.metadata?.id, manualPreview?.metadata?.status, manualPreview?.metadata?.progress]);
+
+  // Keep the selected in-progress manual fresh even if the list response is stale.
+  useEffect(() => {
+    if (!videoId || !manualPreview?.metadata?.id) return;
+    if (!GENERATING_STATUSES.has(manualPreview.metadata.status)) return;
+
+    let cancelled = false;
+    const refreshPreview = async () => {
+      try {
+        const data = await getManual(videoId, manualPreview.metadata.id, true);
+        if (cancelled) return;
+        setManualPreview(data);
+        setManuals((prev) => upsertManual(prev, data.metadata));
+      } catch (err) {
+        console.error("manual live refresh failed", err);
+      }
+    };
+
+    refreshPreview();
+    const interval = window.setInterval(refreshPreview, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [videoId, manualPreview?.metadata?.id, manualPreview?.metadata?.status]);
 
   const handleGenerateManual = useCallback(async () => {
     if (!videoId) return;
@@ -102,6 +164,7 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     try {
       const manual = await generateManual(videoId, manualMode);
       setManualPreview({ metadata: manual, content: "" });
+      setManuals((prev) => upsertManual(prev, manual));
       await loadManuals({ silent: true });
     } catch (err) {
       if (setError) setError(err.message);
@@ -143,6 +206,7 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
       try {
         await deleteManual(videoId, manual.id);
         if (manualPreview?.metadata?.id === manual.id) setManualPreview(null);
+        setManuals((prev) => prev.filter((item) => item.id !== manual.id));
         await loadManuals({ silent: true });
         setManualToDelete(null);
       } catch (err) {

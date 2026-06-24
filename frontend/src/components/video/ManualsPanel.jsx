@@ -14,6 +14,29 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { MarkdownDocument } from "@/components/markdown/MarkdownDocument";
 import "./ManualsPanel.css";
 
+const GENERATING_STATUSES = new Set(["processing", "queued"]);
+
+function mergePreviewManual(manuals, manualPreview) {
+  const previewManual = manualPreview?.metadata;
+  if (!previewManual) return manuals;
+
+  const exists = manuals.some((manual) => manual.id === previewManual.id);
+  const merged = exists
+    ? manuals.map((manual) =>
+        manual.id === previewManual.id ? { ...manual, ...previewManual } : manual
+      )
+    : [previewManual, ...manuals];
+
+  return merged;
+}
+
+function manualLiveMessage(metadata) {
+  if (metadata.last_generated_text) return metadata.last_generated_text;
+  if (metadata.current_section) return metadata.current_section;
+  if ((metadata.progress || 0) > 0) return "Preparando contenido del manual...";
+  return "Esperando el inicio de la generación...";
+}
+
 export function ManualsPanel({
   video,
   manuals,
@@ -27,6 +50,8 @@ export function ManualsPanel({
   onDeleteRequest,
   getAssetsUrl,
 }) {
+  const visibleManuals = mergePreviewManual(manuals, manualPreview);
+
   return (
     <section className="manual-surface">
       <div className="manual-header">
@@ -61,14 +86,14 @@ export function ManualsPanel({
 
       {/* Manual list */}
       <div className="manual-list">
-        {manuals.length === 0 ? (
+        {visibleManuals.length === 0 ? (
           <EmptyState
             icon={BookOpen}
             title="Sin manuales"
             body="Genera un manual profesional redactado con LLM local."
           />
         ) : (
-          manuals.map((manual) => (
+          visibleManuals.map((manual) => (
             <article key={manual.id} className="manual-card">
               <div className="manual-card-main">
                 <div className="manual-card-icon">
@@ -130,7 +155,7 @@ export function ManualsPanel({
                 </button>
               </div>
 
-              {(manual.status === "processing" || manual.status === "queued") && (
+              {GENERATING_STATUSES.has(manual.status) && (
                 <div className="manual-generation-status">
                   <div>
                     <span>{manual.current_section || "Preparando generación"}</span>
@@ -190,14 +215,10 @@ export function ManualsPanel({
             </div>
           </div>
 
-          {(manualPreview.metadata.status === "processing" ||
-            manualPreview.metadata.status === "queued") && (
+          {GENERATING_STATUSES.has(manualPreview.metadata.status) && (
             <div className="manual-live-strip">
               <ProgressBar value={manualPreview.metadata.progress} />
-              <p>
-                {manualPreview.metadata.last_generated_text ||
-                  "Esperando las primeras palabras del modelo..."}
-              </p>
+              <p>{manualLiveMessage(manualPreview.metadata)}</p>
             </div>
           )}
 

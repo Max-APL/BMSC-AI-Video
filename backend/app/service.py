@@ -471,19 +471,26 @@ class VideoService:
                     if total_blocks > 0 and block_index > 0:
                         ratio = min(1.0, max(0.0, (block_index - 0.35) / total_blocks))
                         progress = min(98.0, round(base_progress + (ratio * (98.0 - base_progress)), 2))
+                    current_section = (
+                        f"Bloque {block_index} de {total_blocks}"
+                        if block_index > 0
+                        else f"Preparando {total_blocks} bloques"
+                    )
                     self.storage.save_manual_content(video_id, manual_id, content)
                     self.storage.update_manual_metadata(
                         video_id,
                         manual_id,
                         processing_stage="generating_with_llm",
                         progress=progress,
-                        current_section=(
-                            f"Bloque {block_index} de {total_blocks}"
-                            if block_index > 0
-                            else f"Preparando {total_blocks} bloques"
-                        ),
+                        current_section=current_section,
                         last_generated_text=(delta or content[-240:])[-240:],
                         word_count=count_words(content),
+                    )
+                    log_event(
+                        "Manual progress saved "
+                        f"manual_id={manual_id} progress={progress}% "
+                        f"section='{current_section}' chars={content_length}",
+                        video_id,
                     )
 
                 result = build_llm_manual(
