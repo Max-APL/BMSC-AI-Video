@@ -1,26 +1,3 @@
-/* Subarea selector (converted from inline styles) */
-.upload-subarea-selector {
-  padding: 0 22px;
-  margin-top: -10px;
-  margin-bottom: 10px;
-}
-
-.upload-subarea-label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 14px;
-  font-weight: bold;
-  color: var(--ink-700);
-}
-
-.upload-subarea-select {
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  width: 100%;
-  max-width: 300px;
-}
-
 .upload-restricted {
   justify-content: center;
   text-align: center;
@@ -29,4 +6,78 @@
 .history-row-actions {
   display: flex;
   gap: 8px;
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--green-800);
+}
+
+.modal-title-group p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.upload-modal-form {
+  display: grid;
+  gap: 18px;
+}
+
+.upload-file-drop {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 26px 18px;
+  border: 1px dashed #b9dac9;
+  border-radius: 10px;
+  color: var(--green-800);
+  background: linear-gradient(180deg, #ffffff, var(--green-50));
+  text-align: center;
+  cursor: pointer;
+}
+
+.upload-file-drop span {
+  max-width: 100%;
+  color: var(--ink-900);
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.upload-file-drop small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.upload-file-drop input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.field-group {
+  display: grid;
+  gap: 8px;
+}
+
+.field-group > span {
+  color: var(--ink-700);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.field-group select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-900);
+  background: var(--surface);
+  font-weight: 850;
 }

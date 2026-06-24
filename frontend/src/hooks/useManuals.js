@@ -14,7 +14,7 @@ import {
  */
 export function useManuals(videoId, { setError, setLoading } = {}) {
   const [manuals, setManuals] = useState([]);
-  const [manualMode, setManualMode] = useState("extractive");
+  const [manualMode, setManualMode] = useState("llm");
   const [manualPreview, setManualPreview] = useState(null);
   const [manualToDelete, setManualToDelete] = useState(null);
   const [generatingManual, setGeneratingManual] = useState(false);

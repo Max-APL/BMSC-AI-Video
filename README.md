@@ -383,11 +383,18 @@ All settings are read from `backend/.env`. See `.env.example` for a full templat
 | `WHISPER_LANGUAGE` | *(auto-detect)* | Force language code (e.g. `es`) |
 | `WHISPER_AUDIO_CHUNK_SECONDS` | `300` | Audio chunk size to limit RAM usage |
 | `WHISPER_BEAM_SIZE` | `5` | Beam search width (lower = faster, less accurate) |
+| `WHISPER_BEST_OF` | `5` | Candidate count used by Whisper decoding |
+| `WHISPER_CPU_THREADS` | `auto` | CPU threads used by faster-whisper |
+| `WHISPER_NUM_WORKERS` | `auto` | faster-whisper worker count |
+| `WHISPER_CHUNK_WORKERS` | `1` | Parallel audio chunk transcription workers |
 | `SEARCH_CHUNK_SECONDS` | `14` | Transcript segment length for search index |
 | `SEARCH_CHUNK_MAX_CHARS` | `320` | Maximum characters per search chunk |
 | `LLM_PROVIDER` | `llama_cpp` | Local LLM provider. Only `llama_cpp` is supported. |
 | `LLM_MODEL_PATH` | *(none)* | Path to local GGUF model file |
 | `LLM_N_GPU_LAYERS` | `-1` | GPU layers for llama.cpp (`-1` = auto) |
+| `LLM_NUM_CTX` | `4096` | llama.cpp context window |
+| `LLM_MAX_TOKENS_ANSWER` | `256` | Maximum answer tokens for Q&A |
+| `LLM_MAX_TOKENS_SECTION` | `1000` | Maximum tokens per generated manual section |
 | `CORS_ORIGINS` | `http://localhost:5173,...` | Comma-separated allowed origins |
 
 ### Memory & Performance Guidance
@@ -432,7 +439,7 @@ All endpoints except `GET /health` require `Authorization: Bearer <token>`.
 | `POST` | `/videos/{id}/process` | Reprocess (re-transcribe) a video |
 | `POST` | `/videos/{id}/index` | Rebuild TF-IDF index without re-transcribing |
 | `POST` | `/videos/{id}/query` | TF-IDF search query with top-k results and timecodes |
-| `POST` | `/videos/{id}/ask` | Natural language question with extractive answer |
+| `POST` | `/videos/{id}/ask` | Natural language question with LLM or extractive answer |
 
 ### Manuals
 

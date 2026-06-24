@@ -7,7 +7,6 @@ import {
   Loader2,
   Trash2,
 } from "lucide-react";
-import { cx } from "@/utils/cx";
 import { formatDateTime } from "@/utils/format";
 import { StatusPill } from "@/components/common/StatusPill";
 import { ProgressBar } from "@/components/common/ProgressBar";
@@ -18,8 +17,6 @@ import "./ManualsPanel.css";
 export function ManualsPanel({
   video,
   manuals,
-  manualMode,
-  setManualMode,
   manualPreview,
   generatingManual,
   loading,
@@ -40,23 +37,9 @@ export function ManualsPanel({
 
         {hasGeneratePermission && (
           <div className="manual-controls">
-            <div className="segmented-control">
-              <button
-                type="button"
-                className={cx(manualMode === "extractive" && "active")}
-                onClick={() => setManualMode("extractive")}
-              >
-                <FileText size={16} />
-                Extractivo
-              </button>
-              <button
-                type="button"
-                className={cx(manualMode === "llm" && "active")}
-                onClick={() => setManualMode("llm")}
-              >
-                <Bot size={16} />
-                Redactado con LLM
-              </button>
+            <div className="manual-mode-chip">
+              <Bot size={16} />
+              LLM local
             </div>
 
             <button
@@ -82,7 +65,7 @@ export function ManualsPanel({
           <EmptyState
             icon={BookOpen}
             title="Sin manuales"
-            body="Genera una versión extractiva o una versión redactada con LLM."
+            body="Genera un manual profesional redactado con LLM local."
           />
         ) : (
           manuals.map((manual) => (
@@ -96,7 +79,7 @@ export function ManualsPanel({
                   <span>
                     {manual.mode === "llm"
                       ? `LLM · ${manual.model || "modelo local"}`
-                      : "Extractivo"}
+                      : "Manual histórico"}
                     {" · "}
                     {manual.section_count} secciones · {manual.word_count} palabras
                     {manual.screenshot_count

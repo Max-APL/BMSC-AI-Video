@@ -24,6 +24,7 @@ from .models import (
     VideoUpdate,
 )
 from .search import TfidfSearchEngine
+from .screenshots import ScreenshotError
 from .service import VideoService
 from .storage import VideoStorage
 from .transcription import FasterWhisperTranscriber
@@ -120,7 +121,14 @@ def recover_interrupted_processing() -> None:
         f"device={settings.whisper_device} "
         f"compute_type={settings.whisper_compute_type} "
         f"audio_chunk_seconds={settings.whisper_audio_chunk_seconds} "
-        f"beam_size={settings.whisper_beam_size}"
+        f"beam_size={settings.whisper_beam_size} "
+        f"best_of={settings.whisper_best_of} "
+        f"whisper_cpu_threads={settings.whisper_cpu_threads} "
+        f"whisper_num_workers={settings.whisper_num_workers} "
+        f"whisper_chunk_workers={settings.whisper_chunk_workers} "
+        f"llm_ctx={settings.llm_num_ctx} "
+        f"llm_threads={settings.llm_n_threads or 'auto'} "
+        f"llm_batch={settings.llm_n_batch}"
     )
     recovered = service.recover_interrupted_processing()
     log_event(f"Interrupted processing recovery complete recovered={recovered}")
@@ -256,6 +264,23 @@ def get_video_media(video_id: str) -> FileResponse:
 
     return FileResponse(
         path=source_path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="inline",
+    )
+
+
+@app.get("/videos/{video_id}/thumbnail", response_class=FileResponse)
+def get_video_thumbnail(video_id: str) -> FileResponse:
+    try:
+        thumbnail_path, media_type, filename = service.get_video_thumbnail(video_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc
+    except ScreenshotError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=thumbnail_path,
         media_type=media_type,
         filename=filename,
         content_disposition_type="inline",

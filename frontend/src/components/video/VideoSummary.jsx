@@ -1,11 +1,25 @@
 import React from "react";
 import { PlayCircle, RefreshCcw, Trash2 } from "lucide-react";
-import { formatDate, formatSeconds } from "@/utils/format";
+import {
+  formatDate,
+  formatLanguage,
+  formatSeconds,
+  formatTranscriptionEngine,
+} from "@/utils/format";
 import { StatusPill } from "@/components/common/StatusPill";
 import { ProgressBar } from "@/components/common/ProgressBar";
+import { AreaAssignmentChip } from "@/components/common/AreaAssignmentChip";
 import "./VideoSummary.css";
 
-export function VideoSummary({ video, manualsCount, latestManual, onReprocess, onDeleteRequest, loading }) {
+export function VideoSummary({
+  video,
+  areaLabel,
+  manualsCount,
+  latestManual,
+  onReprocess,
+  onDeleteRequest,
+  loading,
+}) {
   if (!video) return null;
 
   return (
@@ -23,6 +37,10 @@ export function VideoSummary({ video, manualsCount, latestManual, onReprocess, o
             {formatSeconds(video.duration_seconds)} · {video.segment_count} segmentos ·{" "}
             {video.chunk_count} fragmentos indexados
           </p>
+          <AreaAssignmentChip
+            label={areaLabel || "Sin área asignada"}
+            unassigned={!video.subarea_id}
+          />
         </div>
       </div>
 
@@ -42,11 +60,9 @@ export function VideoSummary({ video, manualsCount, latestManual, onReprocess, o
           </small>
         </div>
         <div>
-          <span>Audio</span>
-          <strong>{video.audio_extraction_backend || "Pendiente"}</strong>
-          <small>
-            {video.language ? `Idioma ${video.language}` : "Idioma por detectar"}
-          </small>
+          <span>Transcripción</span>
+          <strong>{formatTranscriptionEngine(video)}</strong>
+          <small>Idioma: {formatLanguage(video.language)}</small>
         </div>
         <div>
           <span>Manuales</span>

@@ -11,6 +11,9 @@ export const generateManual = (videoId, mode) => {
     include_timestamps: true,
     include_screenshots: true,
   };
+  if (mode === "llm") {
+    body.provider = "llama_cpp";
+  }
   return apiRequest(`/videos/${videoId}/manuals`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

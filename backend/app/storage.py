@@ -53,6 +53,9 @@ class VideoStorage:
     def audio_path(self, video_id: str) -> Path:
         return self.video_dir(video_id) / "audio.wav"
 
+    def thumbnail_path(self, video_id: str) -> Path:
+        return self.video_dir(video_id) / "thumbnail.jpg"
+
     def source_path(self, metadata: VideoMetadata) -> Path:
         return self.video_dir(metadata.id) / metadata.stored_filename
 

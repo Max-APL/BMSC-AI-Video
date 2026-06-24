@@ -13,6 +13,7 @@ import { DeleteManualModal } from "@/components/modals/DeleteManualModal";
 import { cx } from "@/utils/cx";
 import { useAuth } from "@/context/AuthContext";
 import { useVideos } from "@/context/VideosContext";
+import { useAreas } from "@/context/AreasContext";
 import { useManuals } from "@/hooks/useManuals";
 import {
   reindexVideo,
@@ -30,6 +31,7 @@ export function VideoDetailPage() {
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
   const { videos, loading, setLoading, error, setError, loadVideos } = useVideos();
+  const { areas } = useAreas();
 
   const video = videos.find((v) => v.id === id) || null;
   const videoSrc = id ? mediaUrl(id) : "";
@@ -188,6 +190,16 @@ export function VideoDetailPage() {
   }
 
   const latestManual = manuals[0] || null;
+  const areaLabel =
+    areas
+      .flatMap((area) =>
+        area.subareas.map((subarea) => ({
+          id: subarea.id,
+          label: `${area.name} > ${subarea.name}`,
+        }))
+      )
+      .find((subarea) => subarea.id === video?.subarea_id)?.label ||
+    "Sin área asignada";
 
   const reindexAction = (
     <button
@@ -334,6 +346,7 @@ export function VideoDetailPage() {
       {/* Technical summary always visible */}
       <VideoSummary
         video={video}
+        areaLabel={areaLabel}
         manualsCount={manuals.length}
         latestManual={latestManual}
         onReprocess={handleReprocess}

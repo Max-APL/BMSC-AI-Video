@@ -241,48 +241,6 @@
       }
     },
     {
-      "name": "Generar Manual Extractivo Sin LLM",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "if (pm.response.code >= 200 && pm.response.code < 300) {",
-              "  const data = pm.response.json();",
-              "  if (data.id) pm.collectionVariables.set('manual_id', data.id);",
-              "}"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"mode\": \"extractive\",\n  \"format\": \"markdown\",\n  \"include_timestamps\": true,\n  \"include_screenshots\": true\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/videos/{{video_id}}/manuals",
-          "host": [
-            "{{base_url}}"
-          ],
-          "path": [
-            "videos",
-            "{{video_id}}",
-            "manuals"
-          ]
-        },
-        "description": "Genera un manual fiel a la transcripcion sin usar LLM. Guarda manual_id como variable de coleccion."
-      }
-    },
-    {
       "name": "Generar Manual Con LLM Local",
       "event": [
         {
@@ -321,7 +279,7 @@
             "manuals"
           ]
         },
-        "description": "Genera un manual redactado por LLM local via llama.cpp. Requiere llama-cpp-python instalado y un modelo GGUF disponible o descargable."
+        "description": "Genera un manual profesional redactado por el LLM local configurado en el backend via llama.cpp. Requiere llama-cpp-python instalado y un modelo GGUF disponible o descargable. Guarda manual_id como variable de coleccion."
       }
     },
     {

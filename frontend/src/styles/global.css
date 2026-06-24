@@ -188,6 +188,29 @@ img {
   display: none;
 }
 
+.area-assignment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid #c9e3d5;
+  border-radius: 999px;
+  color: var(--green-800);
+  background: var(--green-50);
+  font-size: 12px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.area-assignment-chip.unassigned {
+  color: var(--muted);
+  border-color: var(--line);
+  background: var(--surface-soft);
+}
+
 .sidebar-title,
 .video-item-top,
 .summary-title-row,
@@ -987,6 +1010,20 @@ h3 {
   flex-wrap: wrap;
 }
 
+.manual-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #c9e3d5;
+  border-radius: 8px;
+  color: var(--green-800);
+  background: var(--green-50);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .segmented-control {
   display: inline-flex;
   gap: 4px;
@@ -1185,7 +1222,7 @@ h3 {
 
 .manual-document h3 {
   margin: 18px 0 8px;
-  color: var(--wine-800);
+  color: var(--green-800);
   font-size: 15px;
 }
 

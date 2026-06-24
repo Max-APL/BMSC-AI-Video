@@ -156,7 +156,7 @@ class AnswerResponse(BaseModel):
 
 
 class ManualRequest(BaseModel):
-    mode: ManualMode = Field(ManualMode.extractive, description="Motor de generacion")
+    mode: ManualMode = Field(ManualMode.llm, description="Motor de generacion")
     format: str = Field("markdown", description="Formato base de salida")
     provider: Optional[str] = Field(None, description="Proveedor local del LLM")
     model: Optional[str] = Field(None, description="Modelo local para modo llm")
@@ -218,3 +218,17 @@ class SystemDependenciesResponse(BaseModel):
     whisper_compute_type: str
     whisper_audio_chunk_seconds: int
     whisper_beam_size: int
+    whisper_best_of: int
+    whisper_temperature: float
+    whisper_condition_on_previous_text: bool
+    whisper_cpu_threads: int
+    whisper_num_workers: int
+    whisper_chunk_workers: int
+    llm_n_gpu_layers: int
+    llm_n_threads: int
+    llm_n_threads_batch: int
+    llm_n_batch: int
+    llm_n_ubatch: int
+    llm_num_ctx: int
+    llm_max_tokens_answer: int
+    llm_max_tokens_section: int

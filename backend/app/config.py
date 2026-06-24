@@ -26,6 +26,11 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_auto_int(name: str, default: int) -> int:
+    value = _env_int(name, default)
+    return default if value <= 0 else value
+
+
 def _env_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if not value:
@@ -34,6 +39,13 @@ def _env_float(name: str, default: float) -> float:
         return float(value)
     except ValueError:
         return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if not value:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_path(name: str) -> Optional[Path]:
@@ -51,10 +63,63 @@ def _env_path_with_default(name: str, default: Path) -> Path:
     return path.resolve()
 
 
+def _env_optional_language(name: str) -> Optional[str]:
+    value = os.getenv(name)
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"auto", "und", "unknown", "none", "null"}:
+        return None
+    return value.strip()
+
+
 def _env_origins(name: str, default: str) -> Tuple[str, ...]:
     raw_value = os.getenv(name, default)
     origins = tuple(origin.strip() for origin in raw_value.split(",") if origin.strip())
     return origins or ("*",)
+
+
+def _cpu_count() -> int:
+    return max(1, os.cpu_count() or 4)
+
+
+def _default_model_threads() -> int:
+    cpus = _cpu_count()
+    if cpus <= 2:
+        return 1
+    if cpus <= 4:
+        return cpus - 1
+    if cpus <= 8:
+        return cpus - 2
+    if cpus <= 16:
+        return min(12, cpus - 4)
+    return 12
+
+
+def _default_whisper_threads() -> int:
+    cpus = _cpu_count()
+    if cpus <= 2:
+        return 1
+    if cpus <= 4:
+        return cpus - 1
+    if cpus <= 8:
+        return cpus - 2
+    return 8
+
+
+def _default_batch_threads() -> int:
+    return min(32, _cpu_count())
+
+
+def _default_llm_batch() -> int:
+    cpus = _cpu_count()
+    if cpus < 8:
+        return 512
+    return 1024
+
+
+def _default_llm_context() -> int:
+    return 4096
 
 
 @dataclass(frozen=True)
@@ -66,10 +131,16 @@ class Settings:
     whisper_model: str = os.getenv("WHISPER_MODEL", "base")
     whisper_device: str = os.getenv("WHISPER_DEVICE", "cpu")
     whisper_compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
-    whisper_language: Optional[str] = os.getenv("WHISPER_LANGUAGE") or None
+    whisper_language: Optional[str] = _env_optional_language("WHISPER_LANGUAGE")
     whisper_model_dir: Optional[Path] = _env_path("WHISPER_MODEL_DIR")
     whisper_audio_chunk_seconds: int = _env_int("WHISPER_AUDIO_CHUNK_SECONDS", 300)
     whisper_beam_size: int = _env_int("WHISPER_BEAM_SIZE", 5)
+    whisper_best_of: int = _env_int("WHISPER_BEST_OF", 5)
+    whisper_temperature: float = _env_float("WHISPER_TEMPERATURE", 0.0)
+    whisper_condition_on_previous_text: bool = _env_bool("WHISPER_CONDITION_ON_PREVIOUS_TEXT", True)
+    whisper_cpu_threads: int = _env_auto_int("WHISPER_CPU_THREADS", _default_whisper_threads())
+    whisper_num_workers: int = _env_auto_int("WHISPER_NUM_WORKERS", 1)
+    whisper_chunk_workers: int = _env_int("WHISPER_CHUNK_WORKERS", 1)
 
     search_chunk_seconds: int = _env_int("SEARCH_CHUNK_SECONDS", 14)
     search_chunk_max_chars: int = _env_int("SEARCH_CHUNK_MAX_CHARS", 320)
@@ -88,9 +159,15 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")
     llm_model_path: Optional[Path] = _env_path("LLM_MODEL_PATH")
     llm_n_gpu_layers: int = _env_int("LLM_N_GPU_LAYERS", -1)
+    llm_n_threads: int = _env_auto_int("LLM_N_THREADS", _default_model_threads())
+    llm_n_threads_batch: int = _env_auto_int("LLM_N_THREADS_BATCH", _default_batch_threads())
+    llm_n_batch: int = _env_auto_int("LLM_N_BATCH", _default_llm_batch())
+    llm_n_ubatch: int = _env_int("LLM_N_UBATCH", 512)
+    llm_max_tokens_answer: int = _env_int("LLM_MAX_TOKENS_ANSWER", 256)
+    llm_max_tokens_section: int = _env_int("LLM_MAX_TOKENS_SECTION", 1000)
     llm_timeout_seconds: int = _env_int("LLM_TIMEOUT_SECONDS", 900)
     llm_temperature: float = _env_float("LLM_TEMPERATURE", 0.2)
-    llm_num_ctx: int = _env_int("LLM_NUM_CTX", 8192)
+    llm_num_ctx: int = _env_auto_int("LLM_NUM_CTX", _default_llm_context())
 
     cors_origins: Tuple[str, ...] = _env_origins(
         "CORS_ORIGINS",

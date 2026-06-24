@@ -31,3 +31,16 @@ export function formatDateTime(value) {
     hour12: false,
   }).format(new Date(value));
 }
+
+export function formatLanguage(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["es", "spa", "spanish", "español", "espanol"].includes(normalized)) return "Español";
+  if (["en", "eng", "english", "inglés", "ingles"].includes(normalized)) return "Inglés";
+  return "No determinado";
+}
+
+export function formatTranscriptionEngine(video) {
+  if (!video || video.status === "uploaded") return "Pendiente";
+  if (video.status === "failed") return "Fallida";
+  return "Faster-Whisper";
+}

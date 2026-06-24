@@ -1,10 +1,11 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Edit2, PlayCircle, RefreshCcw, Trash2, UploadCloud } from "lucide-react";
+import { Edit2, FileVideo, PlayCircle, RefreshCcw, Trash2, UploadCloud, X } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
 import { StatusPill } from "@/components/common/StatusPill";
 import { ProgressBar } from "@/components/common/ProgressBar";
 import { EmptyState } from "@/components/common/EmptyState";
+import { AreaAssignmentChip } from "@/components/common/AreaAssignmentChip";
 import { EditVideoModal } from "@/components/modals/EditVideoModal";
 import { DeleteVideoModal } from "@/components/modals/DeleteVideoModal";
 import { formatDate, formatSeconds } from "@/utils/format";
@@ -21,9 +22,10 @@ export function UploadPage() {
   const { videos, uploading, setUploading, error, setError, loading, setLoading, loadVideos } =
     useVideos();
   const { areas } = useAreas();
-  const fileInputRef = useRef(null);
 
   const [uploadSubareaId, setUploadSubareaId] = useState("");
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
   const [editingVideo, setEditingVideo] = useState(null);
   const [editFilename, setEditFilename] = useState("");
   const [editSubarea, setEditSubarea] = useState("");
@@ -33,23 +35,47 @@ export function UploadPage() {
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
     .slice(0, 5);
 
-  async function handleFileChange(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const availableSubareas = areas.flatMap((area) =>
+    area.subareas.map((subarea) => ({
+      id: subarea.id,
+      label: `${area.name} > ${subarea.name}`,
+    }))
+  );
+  const uploadRequiresAssignment = availableSubareas.length > 0;
+
+  function getSubareaLabel(subareaId) {
+    if (!subareaId) return "Sin área asignada";
+    const match = availableSubareas.find((subarea) => subarea.id === subareaId);
+    return match?.label || "Sin área asignada";
+  }
+
+  function closeUploadModal() {
+    if (uploading) return;
+    setIsUploadModalOpen(false);
+    setUploadFile(null);
+    setUploadSubareaId("");
+  }
+
+  async function handleUploadSubmit(event) {
+    event.preventDefault();
+    if (!uploadFile) return;
+    if (uploadRequiresAssignment && !uploadSubareaId) return;
     setUploading(true);
     setError("");
     try {
-      const metadata = await uploadVideo(file);
+      const metadata = await uploadVideo(uploadFile);
       if (uploadSubareaId) {
         await assignVideoSubarea(metadata.id, uploadSubareaId);
       }
+      setIsUploadModalOpen(false);
+      setUploadFile(null);
+      setUploadSubareaId("");
       navigate(`/videos/${metadata.id}`);
       await loadVideos({ silent: true });
     } catch (err) {
       setError(err.message);
     } finally {
       setUploading(false);
-      event.target.value = "";
     }
   }
 
@@ -102,42 +128,12 @@ export function UploadPage() {
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => setIsUploadModalOpen(true)}
                 disabled={uploading}
               >
                 <UploadCloud size={18} />
-                {uploading ? "Subiendo..." : "Seleccionar archivo"}
+                {uploading ? "Subiendo..." : "Subir video"}
               </button>
-            </div>
-
-            <input
-              ref={fileInputRef}
-              className="hidden-input"
-              type="file"
-              accept="video/*,audio/*,.mkv,.mvk"
-              onChange={handleFileChange}
-            />
-
-            <div className="upload-subarea-selector">
-              <label className="upload-subarea-label">
-                Asignar a subárea (Opcional):
-              </label>
-              <select
-                value={uploadSubareaId}
-                onChange={(e) => setUploadSubareaId(e.target.value)}
-                className="upload-subarea-select"
-              >
-                <option value="">Sin asignar</option>
-                {areas.map((area) => (
-                  <optgroup key={area.id} label={area.name}>
-                    {area.subareas.map((sub) => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
             </div>
           </>
         ) : (
@@ -185,18 +181,11 @@ export function UploadPage() {
                     <span>
                       {formatSeconds(video.duration_seconds)} · Cargado{" "}
                       {formatDate(video.created_at)}
-                      {video.subarea_id &&
-                        (() => {
-                          let subName = "";
-                          areas.forEach((a) =>
-                            a.subareas.forEach((s) => {
-                              if (s.id === video.subarea_id)
-                                subName = `${a.name} > ${s.name}`;
-                            })
-                          );
-                          return subName ? ` · ${subName}` : "";
-                        })()}
                     </span>
+                    <AreaAssignmentChip
+                      label={getSubareaLabel(video.subarea_id)}
+                      unassigned={!video.subarea_id}
+                    />
                     {video.status === "processing" && (
                       <ProgressBar value={video.processing_progress} />
                     )}
@@ -253,6 +242,92 @@ export function UploadPage() {
         onClose={() => setVideoToDelete(null)}
         loading={loading}
       />
+
+      {isUploadModalOpen && (
+        <div className="modal-overlay" onClick={closeUploadModal}>
+          <div className="modal-content upload-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title-group">
+                <UploadCloud size={24} />
+                <div>
+                  <h2>Subir video</h2>
+                  <p>Selecciona el archivo y asígnalo al área correspondiente.</p>
+                </div>
+              </div>
+              <button
+                className="close-btn"
+                type="button"
+                onClick={closeUploadModal}
+                disabled={uploading}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form className="upload-modal-form" onSubmit={handleUploadSubmit}>
+              <label className="upload-file-drop">
+                <FileVideo size={24} />
+                <span>{uploadFile ? uploadFile.name : "Seleccionar archivo de video"}</span>
+                <small>
+                  {uploadFile
+                    ? `${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB`
+                    : "Formatos compatibles: MP4, MKV y otros formatos de video"}
+                </small>
+                <input
+                  type="file"
+                  accept="video/*,audio/*,.mkv,.mvk"
+                  onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                  disabled={uploading}
+                />
+              </label>
+
+              <label className="field-group">
+                <span>Área asignada</span>
+                <select
+                  value={uploadSubareaId}
+                  onChange={(event) => setUploadSubareaId(event.target.value)}
+                  disabled={uploading || availableSubareas.length === 0}
+                  required={uploadRequiresAssignment}
+                >
+                  <option value="">
+                    {availableSubareas.length === 0
+                      ? "Sin áreas configuradas"
+                      : "Seleccionar área y subárea"}
+                  </option>
+                  {areas.map((area) => (
+                    <optgroup key={area.id} label={area.name}>
+                      {area.subareas.map((sub) => (
+                        <option key={sub.id} value={sub.id}>
+                          {sub.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+
+              <div className="modal-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={closeUploadModal}
+                  disabled={uploading}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={uploading || !uploadFile || (uploadRequiresAssignment && !uploadSubareaId)}
+                >
+                  <UploadCloud size={17} />
+                  Subir video
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -1,5 +1,7 @@
 .claude/
 .vscode/
+.codex/
+.agents/
 
 # OS
 .DS_Store

@@ -1,12 +1,15 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock3, Database, FileText, FolderOpen, PlayCircle } from "lucide-react";
+import { Clock3, FileText, FolderOpen, PlayCircle, Search } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
 import { StatusPill } from "@/components/common/StatusPill";
 import { ProgressBar } from "@/components/common/ProgressBar";
+import { EmptyState } from "@/components/common/EmptyState";
+import { AreaAssignmentChip } from "@/components/common/AreaAssignmentChip";
 import { formatDate, formatSeconds } from "@/utils/format";
 import { useVideos } from "@/context/VideosContext";
 import { useAreas } from "@/context/AreasContext";
+import { thumbnailUrl } from "@/services/videos";
 import { cx } from "@/utils/cx";
 import "./LibraryPage.css";
 
@@ -17,8 +20,9 @@ export function LibraryPage() {
 
   const [filterArea, setFilterArea] = useState(null);
   const [filterSubarea, setFilterSubarea] = useState(null);
+  const [search, setSearch] = useState("");
 
-  const filteredVideos = videos.filter((v) => {
+  const scopedVideos = videos.filter((v) => {
     if (filterSubarea) return v.subarea_id === filterSubarea.id;
     if (filterArea) {
       const subIds = filterArea.subareas.map((s) => s.id);
@@ -26,15 +30,21 @@ export function LibraryPage() {
     }
     return true;
   });
+  const searchTerm = search.trim().toLowerCase();
+  const filteredVideos = scopedVideos.filter(
+    (video) =>
+      !searchTerm || video.original_filename.toLowerCase().includes(searchTerm)
+  );
 
   function getSubareaLabel(subareaId) {
-    let label = "Sin área asignada";
+    if (!subareaId) return "Sin área asignada";
+    let label = "";
     areas.forEach((a) =>
       a.subareas.forEach((s) => {
         if (s.id === subareaId) label = `${a.name} > ${s.name}`;
       })
     );
-    return label;
+    return label || "Sin área asignada";
   }
 
   return (
@@ -120,18 +130,56 @@ export function LibraryPage() {
             </div>
             <div className="library-mini-stats">
               <span>
-                <strong>{filteredVideos.length}</strong> Total
+                <strong>{scopedVideos.length}</strong> Total
               </span>
+              {searchTerm && (
+                <span>
+                  <strong>{filteredVideos.length}</strong> Resultados
+                </span>
+              )}
             </div>
           </div>
 
+          <label className="library-search">
+            <Search size={16} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={
+                filterArea
+                  ? "Buscar video dentro del área..."
+                  : "Buscar video en la biblioteca..."
+              }
+            />
+          </label>
+
           <div className="library-grid">
+            {filteredVideos.length === 0 && (
+              <EmptyState
+                icon={Search}
+                title="Sin videos encontrados"
+                body={
+                  searchTerm
+                    ? "Prueba con otro nombre o limpia la búsqueda."
+                    : "No hay videos registrados en esta selección."
+                }
+              />
+            )}
             {filteredVideos.map((video) => (
               <article key={video.id} className="library-card library-card-media">
                 <div className="library-card-thumb">
                   <div className="library-card-icon-wrap">
-                    <PlayCircle size={32} color="var(--green-700)" />
+                    <PlayCircle size={34} color="var(--green-700)" />
                   </div>
+                  <img
+                    className="library-card-thumb-image"
+                    src={thumbnailUrl(video.id)}
+                    alt=""
+                    loading="lazy"
+                    onError={(event) => {
+                      event.currentTarget.style.display = "none";
+                    }}
+                  />
                   <div className="library-card-status-badge">
                     <StatusPill status={video.status} stage={video.processing_stage} />
                   </div>
@@ -154,10 +202,10 @@ export function LibraryPage() {
                       {formatDate(video.created_at)}
                     </div>
                     <div className="library-card-meta-item">
-                      <Database size={14} />
-                      {video.subarea_id
-                        ? getSubareaLabel(video.subarea_id)
-                        : "Sin área asignada"}
+                      <AreaAssignmentChip
+                        label={getSubareaLabel(video.subarea_id)}
+                        unassigned={!video.subarea_id}
+                      />
                     </div>
                     <div className="library-card-meta-item">
                       <FileText size={14} />

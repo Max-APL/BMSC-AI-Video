@@ -55,7 +55,7 @@ export function AssistantPanel({
               <input
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Pregunta sobre el video..."
+                placeholder="Pregunta algo del video o escribe un término para encontrarlo"
                 disabled={video.status !== "ready"}
               />
               <button
@@ -84,8 +84,8 @@ export function AssistantPanel({
             {!answer && video.status === "ready" && (
               <EmptyState
                 icon={Bot}
-                title="Haz una pregunta"
-                body="El asistente responderá citando el fragmento del video donde encontró evidencia."
+                title="Busca dentro del video"
+                body="Escribe una pregunta o una palabra clave; el asistente responderá con el fragmento exacto donde encontró evidencia."
               />
             )}
 

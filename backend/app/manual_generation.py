@@ -269,7 +269,15 @@ def _ensure_llama_model(configured_path: Optional[Path]) -> Path:
     return Path(downloaded)
 
 
-def _get_llama(model_path: Optional[Path], n_ctx: int, n_gpu_layers: int) -> Any:
+def _get_llama_with_options(
+    model_path: Optional[Path],
+    n_ctx: int,
+    n_gpu_layers: int,
+    n_threads: int,
+    n_threads_batch: int,
+    n_batch: int,
+    n_ubatch: int,
+) -> Any:
     global _llama_instance
     with _llama_lock:
         if _llama_instance is None:
@@ -299,27 +307,33 @@ def _get_llama(model_path: Optional[Path], n_ctx: int, n_gpu_layers: int) -> Any
             effective_gpu_layers = n_gpu_layers if gpu_supported else 0
             log_event(
                 f"Cargando modelo GGUF path={resolved} "
-                f"n_ctx={n_ctx} n_gpu_layers={effective_gpu_layers}"
+                f"n_ctx={n_ctx} n_gpu_layers={effective_gpu_layers} "
+                f"n_threads={n_threads or 'auto'} "
+                f"n_threads_batch={n_threads_batch or 'auto'} "
+                f"n_batch={n_batch} n_ubatch={n_ubatch}"
             )
+            llama_kwargs = {
+                "model_path": str(resolved),
+                "n_ctx": n_ctx,
+                "n_gpu_layers": effective_gpu_layers,
+                "n_batch": n_batch,
+                "n_ubatch": n_ubatch,
+                "verbose": True,
+            }
+            if n_threads > 0:
+                llama_kwargs["n_threads"] = n_threads
+            if n_threads_batch > 0:
+                llama_kwargs["n_threads_batch"] = n_threads_batch
             try:
-                _llama_instance = Llama(
-                    model_path=str(resolved),
-                    n_ctx=n_ctx,
-                    n_gpu_layers=effective_gpu_layers,
-                    verbose=True,
-                )
+                _llama_instance = Llama(**llama_kwargs)
                 log_event(
                     f"Modelo GGUF cargado en {'GPU' if effective_gpu_layers != 0 else 'CPU'}"
                 )
             except Exception as exc:
                 if effective_gpu_layers != 0:
                     log_event(f"Carga en GPU fallo ({exc}); reintentando en CPU")
-                    _llama_instance = Llama(
-                        model_path=str(resolved),
-                        n_ctx=n_ctx,
-                        n_gpu_layers=0,
-                        verbose=True,
-                    )
+                    llama_kwargs["n_gpu_layers"] = 0
+                    _llama_instance = Llama(**llama_kwargs)
                     log_event("Modelo GGUF cargado en CPU (fallback)")
                 else:
                     raise
@@ -333,12 +347,24 @@ class LlamaCppClient:
         model_path: Optional[Path],
         n_ctx: int,
         n_gpu_layers: int,
+        n_threads: int,
+        n_threads_batch: int,
+        n_batch: int,
+        n_ubatch: int,
+        max_tokens_answer: int,
+        max_tokens_section: int,
         temperature: float,
         terminology_hints: str,
     ):
         self.model_path = model_path
         self.n_ctx = n_ctx
         self.n_gpu_layers = n_gpu_layers
+        self.n_threads = n_threads
+        self.n_threads_batch = n_threads_batch
+        self.n_batch = n_batch
+        self.n_ubatch = n_ubatch
+        self.max_tokens_answer = max_tokens_answer
+        self.max_tokens_section = max_tokens_section
         self.temperature = temperature
         self.manual_terminology_hints = terminology_hints
 
@@ -406,7 +432,12 @@ Instrucciones:
 Transcripcion:
 {block.text}
 """.strip()
-        return self.chat(system_prompt=system_prompt, user_prompt=user_prompt, on_delta=on_delta)
+        return self.chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=self.max_tokens_section,
+            on_delta=on_delta,
+        )
 
     def terminology_hints(self) -> str:
         hints = getattr(self, "manual_terminology_hints", "")
@@ -448,16 +479,22 @@ Evidencia principal:
 Secciones generadas:
 {section_summaries[:6000]}
 """.strip()
-        return self.chat(system_prompt=system_prompt, user_prompt=user_prompt)
+        return self.chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=self.max_tokens_section,
+        )
 
     def chat(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
+        max_tokens: Optional[int] = None,
         on_delta: Optional[Callable[[str, str], None]] = None,
     ) -> str:
-        llm = _get_llama(self.model_path, self.n_ctx, self.n_gpu_layers)
+        llm = self._llama()
+        resolved_max_tokens = max_tokens or self.max_tokens_answer
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -466,7 +503,7 @@ Secciones generadas:
             response = llm.create_chat_completion(
                 messages=messages,
                 temperature=self.temperature,
-                max_tokens=4096,
+                max_tokens=resolved_max_tokens,
             )
             content = response["choices"][0]["message"]["content"] or ""
             if not content:
@@ -477,7 +514,7 @@ Secciones generadas:
         stream = llm.create_chat_completion(
             messages=messages,
             temperature=self.temperature,
-            max_tokens=4096,
+            max_tokens=resolved_max_tokens,
             stream=True,
         )
         for chunk in stream:
@@ -489,6 +526,17 @@ Secciones generadas:
         if not content:
             raise RuntimeError("llama-cpp-python no devolvio contenido.")
         return content
+
+    def _llama(self):
+        return _get_llama_with_options(
+            self.model_path,
+            self.n_ctx,
+            self.n_gpu_layers,
+            self.n_threads,
+            self.n_threads_batch,
+            self.n_batch,
+            self.n_ubatch,
+        )
 
 
 def normalize_llm_provider(provider: Optional[str]) -> str:
@@ -511,6 +559,12 @@ def get_llm_client(*, provider: str, model: str, settings: Settings) -> Any:
         model_path=settings.llm_model_path,
         n_ctx=settings.llm_num_ctx,
         n_gpu_layers=settings.llm_n_gpu_layers,
+        n_threads=settings.llm_n_threads,
+        n_threads_batch=settings.llm_n_threads_batch,
+        n_batch=settings.llm_n_batch,
+        n_ubatch=settings.llm_n_ubatch,
+        max_tokens_answer=settings.llm_max_tokens_answer,
+        max_tokens_section=settings.llm_max_tokens_section,
         temperature=settings.llm_temperature,
         terminology_hints=settings.manual_terminology_hints,
     )

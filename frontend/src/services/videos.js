@@ -43,3 +43,5 @@ export const askVideo = (id, question) =>
 
 /** Returns a direct URL to stream the video (used in <video src>). */
 export const mediaUrl = (id) => `${API_BASE_URL}/videos/${id}/media`;
+
+export const thumbnailUrl = (id) => `${API_BASE_URL}/videos/${id}/thumbnail`;
