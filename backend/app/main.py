@@ -24,6 +24,7 @@ from .models import (
     VideoUpdate,
 )
 from .search import TfidfSearchEngine
+from .screenshots import ScreenshotError
 from .service import VideoService
 from .storage import VideoStorage
 from .transcription import FasterWhisperTranscriber
@@ -256,6 +257,23 @@ def get_video_media(video_id: str) -> FileResponse:
 
     return FileResponse(
         path=source_path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type="inline",
+    )
+
+
+@app.get("/videos/{video_id}/thumbnail", response_class=FileResponse)
+def get_video_thumbnail(video_id: str) -> FileResponse:
+    try:
+        thumbnail_path, media_type, filename = service.get_video_thumbnail(video_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado") from exc
+    except ScreenshotError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=thumbnail_path,
         media_type=media_type,
         filename=filename,
         content_disposition_type="inline",

@@ -144,7 +144,7 @@ class AnswerResponse(BaseModel):
 
 
 class ManualRequest(BaseModel):
-    mode: ManualMode = Field(ManualMode.extractive, description="Motor de generacion")
+    mode: ManualMode = Field(ManualMode.llm, description="Motor de generacion")
     format: str = Field("markdown", description="Formato base de salida")
     provider: Optional[str] = Field(None, description="Proveedor local del LLM")
     model: Optional[str] = Field(None, description="Modelo local para modo llm")

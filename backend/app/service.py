@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 import traceback
+import unicodedata
 import uuid
 from urllib.parse import unquote
 from pathlib import Path
@@ -14,6 +16,7 @@ from .answering import build_extractive_answer
 from .chunking import build_search_chunks
 from .config import Settings
 from .debug import log_event
+from .language_detection import resolve_transcript_language
 from .manual_exports import ManualExportError, export_manual
 from .manual_generation import (
     build_extractive_manual,
@@ -39,7 +42,7 @@ from .models import (
     VideoStatus,
 )
 from .search import TfidfSearchEngine
-from .screenshots import build_screenshot_targets, extract_manual_screenshots
+from .screenshots import build_screenshot_targets, extract_manual_screenshots, extract_video_thumbnail
 from .storage import VideoStorage, utc_now
 from .timecodes import format_timecode
 from .transcription import (
@@ -208,6 +211,8 @@ class VideoService:
                 on_segment=save_partial_transcript,
                 video_id=video_id,
             )
+            language = resolve_transcript_language(language, (segment.text for segment in segments))
+            log_event(f"Transcript language resolved language={language}", video_id)
             log_event(f"Building search chunks from {len(segments)} transcript segments", video_id)
             self.storage.update_metadata(
                 video_id,
@@ -281,6 +286,25 @@ class VideoService:
         media_type = metadata.content_type or guessed_type or "application/octet-stream"
         return source_path, media_type, metadata.original_filename
 
+    def get_video_thumbnail(self, video_id: str) -> Tuple[Path, str, str]:
+        metadata = self.storage.load_metadata(video_id)
+        source_path = self.storage.source_path(metadata)
+        if not source_path.exists():
+            raise FileNotFoundError(video_id)
+
+        thumbnail_path = self.storage.thumbnail_path(video_id)
+        if thumbnail_path.exists() and thumbnail_path.stat().st_size > 0:
+            return thumbnail_path, "image/jpeg", "thumbnail.jpg"
+
+        extract_video_thumbnail(
+            video_path=source_path,
+            output_path=thumbnail_path,
+            ffmpeg_bin=self.settings.ffmpeg_bin,
+            timestamp_seconds=thumbnail_timestamp(metadata.duration_seconds),
+            width=640,
+        )
+        return thumbnail_path, "image/jpeg", "thumbnail.jpg"
+
     def create_manual(self, video_id: str, request: ManualRequest) -> ManualMetadata:
         if request.format != "markdown":
             raise ValueError("Formato no soportado. Usa format='markdown'.")
@@ -314,7 +338,7 @@ class VideoService:
             include_timestamps=request.include_timestamps,
             include_screenshots=request.include_screenshots,
             title=manual_title(video),
-            filename=f"manual-{request.mode.value}-{compact_datetime_lapaz(now)}-{manual_id[:8]}.md",
+            filename=f"{manual_filename_stem(video, now)}.md",
             created_at=now,
             updated_at=now,
         )
@@ -682,3 +706,23 @@ class VideoService:
             )
             recovered += 1
         return recovered
+
+
+def manual_filename_stem(video: VideoMetadata, created_at: str) -> str:
+    video_name = Path(video.original_filename).stem
+    return f"manual-{slugify_filename_part(video_name)}-{compact_datetime_lapaz(created_at)}"
+
+
+def slugify_filename_part(value: str, max_length: int = 90) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", ascii_text).strip("-").lower()
+    if not slug:
+        slug = "video"
+    return slug[:max_length].rstrip("-") or "video"
+
+
+def thumbnail_timestamp(duration_seconds: float | None) -> float:
+    if duration_seconds is None or duration_seconds <= 0:
+        return 1.0
+    return min(3.0, max(0.0, duration_seconds / 4))

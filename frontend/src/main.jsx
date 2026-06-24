@@ -96,6 +96,19 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatLanguage(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["es", "spa", "spanish", "español", "espanol"].includes(normalized)) return "Español";
+  if (["en", "eng", "english", "inglés", "ingles"].includes(normalized)) return "Inglés";
+  return "No determinado";
+}
+
+function formatTranscriptionEngine(video) {
+  if (!video || video.status === "uploaded") return "Pendiente";
+  if (video.status === "failed") return "Fallida";
+  return "Faster-Whisper";
+}
+
 async function apiRequest(path, options = {}) {
   const token = localStorage.getItem("bmsc_token");
   const headers = new Headers(options.headers || {});
@@ -148,6 +161,15 @@ function EmptyState({ icon: Icon, title, body }) {
       <h3>{title}</h3>
       <p>{body}</p>
     </div>
+  );
+}
+
+function AreaAssignmentChip({ label, unassigned = false }) {
+  return (
+    <span className={cx("area-assignment-chip", unassigned && "unassigned")}>
+      <FolderOpen size={13} />
+      {label}
+    </span>
   );
 }
 
@@ -366,7 +388,7 @@ function App() {
   const [videos, setVideos] = React.useState([]);
   const [selectedId, setSelectedId] = React.useState(null);
   const [transcript, setTranscript] = React.useState([]);
-  const [question, setQuestion] = React.useState("desde donde descargo la app de banca movil?");
+  const [question, setQuestion] = React.useState("");
   const [answer, setAnswer] = React.useState(null);
   const [activeTab, setActiveTab] = React.useState("assistant");
   const [activeView, setActiveView] = React.useState("dashboard");
@@ -385,12 +407,12 @@ function App() {
   const [uploading, setUploading] = React.useState(false);
   const [generatingManual, setGeneratingManual] = React.useState(false);
   const [manuals, setManuals] = React.useState([]);
-  const [manualMode, setManualMode] = React.useState("extractive");
   const [manualPreview, setManualPreview] = React.useState(null);
   const [manualToDelete, setManualToDelete] = React.useState(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = React.useState(false);
+  const [uploadFile, setUploadFile] = React.useState(null);
   const [error, setError] = React.useState("");
   const [playerError, setPlayerError] = React.useState("");
-  const fileInputRef = React.useRef(null);
   const videoRef = React.useRef(null);
 
   const [areas, setAreas] = React.useState([]);
@@ -431,9 +453,37 @@ function App() {
   const [selectedOrgSubarea, setSelectedOrgSubarea] = React.useState(null);
   const [libraryFilterArea, setLibraryFilterArea] = React.useState(null);
   const [libraryFilterSubarea, setLibraryFilterSubarea] = React.useState(null);
+  const [librarySearch, setLibrarySearch] = React.useState("");
 
   const selectedVideo = videos.find((video) => video.id === selectedId) || null;
   const mediaUrl = selectedVideo ? `${API_BASE_URL}/videos/${selectedVideo.id}/media` : "";
+  const availableSubareas = areas.flatMap((area) =>
+    area.subareas.map((subarea) => ({
+      id: subarea.id,
+      label: `${area.name} > ${subarea.name}`,
+    }))
+  );
+  const uploadRequiresAssignment = availableSubareas.length > 0;
+
+  function getSubareaLabel(subareaId) {
+    if (!subareaId) return "";
+    for (const area of areas) {
+      const subarea = area.subareas.find((item) => item.id === subareaId);
+      if (subarea) return `${area.name} > ${subarea.name}`;
+    }
+    return "";
+  }
+
+  function getVideoAreaLabel(video) {
+    return getSubareaLabel(video?.subarea_id) || "Sin área asignada";
+  }
+
+  function closeUploadModal() {
+    if (uploading) return;
+    setIsUploadModalOpen(false);
+    setUploadFile(null);
+    setUploadSubareaId("");
+  }
 
   const loadVideos = React.useCallback(async ({ silent = false } = {}) => {
     if (!token) return;
@@ -608,12 +658,13 @@ function App() {
     player.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  async function handleUpload(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  async function handleUploadSubmit(event) {
+    event.preventDefault();
+    if (!uploadFile) return;
+    if (uploadRequiresAssignment && !uploadSubareaId) return;
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", uploadFile);
     setUploading(true);
     setError("");
 
@@ -632,12 +683,14 @@ function App() {
       setSelectedId(metadata.id);
       setActiveView("video");
       setActiveTab("assistant");
+      setIsUploadModalOpen(false);
+      setUploadFile(null);
+      setUploadSubareaId("");
       await loadVideos({ silent: true });
     } catch (err) {
       setError(err.message);
     } finally {
       setUploading(false);
-      event.target.value = "";
     }
   }
 
@@ -703,14 +756,12 @@ function App() {
     setManualPreview(null);
     try {
       const body = {
-        mode: manualMode,
+        mode: "llm",
         format: "markdown",
+        provider: "llama_cpp",
         include_timestamps: true,
         include_screenshots: true,
       };
-      if (manualMode === "llm") {
-        body.provider = "llama_cpp";
-      }
       const manual = await apiRequest(`/videos/${selectedVideo.id}/manuals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -779,6 +830,18 @@ function App() {
   const recentVideos = loadedHistory.slice(0, 5);
   const filteredQuickVideos = videos.filter((video) =>
     video.original_filename.toLowerCase().includes(quickSearch.trim().toLowerCase())
+  );
+  const libraryScopedVideos = videos.filter((video) => {
+    if (libraryFilterSubarea) return video.subarea_id === libraryFilterSubarea.id;
+    if (libraryFilterArea) {
+      const subIds = libraryFilterArea.subareas.map((subarea) => subarea.id);
+      return subIds.includes(video.subarea_id);
+    }
+    return true;
+  });
+  const librarySearchTerm = librarySearch.trim().toLowerCase();
+  const libraryVisibleVideos = libraryScopedVideos.filter((video) =>
+    !librarySearchTerm || video.original_filename.toLowerCase().includes(librarySearchTerm)
   );
   const latestManual = manuals[0] || null;
   const selectedVideoIsReady = selectedVideo?.status === "ready";
@@ -927,8 +990,6 @@ function App() {
           })}
         </nav>
 
-        <input ref={fileInputRef} className="hidden-input" type="file" accept="video/*,audio/*,.mkv,.mvk" onChange={handleUpload} />
-
         <div className="sidebar-title">
           <span>Biblioteca rápida</span>
           <button type="button" className="icon-button" onClick={() => loadVideos()} title="Actualizar videos">
@@ -1026,10 +1087,6 @@ function App() {
               <ShieldCheck size={15} />
               Entorno institucional
             </div>
-            <div className="api-chip">
-              <Database size={15} />
-              {API_BASE_URL.replace(/^https?:\/\//, "")}
-            </div>
             {activeView === "video" && (
               <button className="secondary-button" type="button" onClick={handleReindex} disabled={!selectedVideo || loading}>
                 <RefreshCcw size={16} />
@@ -1105,6 +1162,7 @@ function App() {
                           <div>
                             <strong>{video.original_filename}</strong>
                             <span>{formatSeconds(video.duration_seconds)} · {formatDate(video.created_at)} · {video.segment_count} segmentos</span>
+                            <AreaAssignmentChip label={getVideoAreaLabel(video)} unassigned={!video.subarea_id} />
                           </div>
                           <StatusPill status={video.status} stage={video.processing_stage} />
                           <button
@@ -1137,28 +1195,10 @@ function App() {
                         <h2>Cargar video de capacitación</h2>
                         <p>El archivo quedará en el historial y luego podrá gestionarse desde su expediente individual.</p>
                       </div>
-                      <button className="primary-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                      <button className="primary-button" type="button" onClick={() => setIsUploadModalOpen(true)} disabled={uploading}>
                         <UploadCloud size={18} />
-                        {uploading ? "Subiendo..." : "Seleccionar archivo"}
+                        {uploading ? "Subiendo..." : "Subir video"}
                       </button>
-                    </div>
-
-                    <div style={{ padding: "0 22px", marginTop: "-10px", marginBottom: "10px" }}>
-                      <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold", color: "var(--ink-700)" }}>Asignar a subárea (Opcional):</label>
-                      <select 
-                        value={uploadSubareaId} 
-                        onChange={e => setUploadSubareaId(e.target.value)}
-                        style={{ padding: "8px", borderRadius: "6px", border: "1px solid var(--line)", width: "100%", maxWidth: "300px" }}
-                      >
-                        <option value="">Sin asignar</option>
-                        {areas.map(area => (
-                          <optgroup key={area.id} label={area.name}>
-                            {area.subareas.map(sub => (
-                              <option key={sub.id} value={sub.id}>{sub.name}</option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </select>
                     </div>
                   </>
                 ) : (
@@ -1197,12 +1237,8 @@ function App() {
                             <strong>{video.original_filename}</strong>
                             <span>
                               {formatSeconds(video.duration_seconds)} · Cargado {formatDate(video.created_at)}
-                              {video.subarea_id && (() => {
-                                let subName = "";
-                                areas.forEach(a => a.subareas.forEach(s => { if(s.id === video.subarea_id) subName = `${a.name} > ${s.name}`; }));
-                                return subName ? ` · ${subName}` : "";
-                              })()}
                             </span>
+                            <AreaAssignmentChip label={getVideoAreaLabel(video)} unassigned={!video.subarea_id} />
                             {video.status === "processing" && <ProgressBar value={video.processing_progress} />}
                           </div>
                           <StatusPill status={video.status} stage={video.processing_stage} />
@@ -1291,42 +1327,52 @@ function App() {
                       <p>Administra los materiales disponibles para consulta, documentación y revisión operativa.</p>
                     </div>
                     <div className="library-mini-stats" aria-label="Resumen de biblioteca">
-                      <span><strong>{videos.filter(v => {
-                        if (libraryFilterSubarea) return v.subarea_id === libraryFilterSubarea.id;
-                        if (libraryFilterArea) {
-                          const subIds = libraryFilterArea.subareas.map(s => s.id);
-                          return subIds.includes(v.subarea_id);
-                        }
-                        return true;
-                      }).length}</strong> Total</span>
+                      <span><strong>{libraryScopedVideos.length}</strong> Total</span>
+                      {librarySearchTerm && <span><strong>{libraryVisibleVideos.length}</strong> Resultados</span>}
                     </div>
                   </div>
 
+                  <label className="library-search">
+                    <Search size={16} />
+                    <input
+                      value={librarySearch}
+                      onChange={(event) => setLibrarySearch(event.target.value)}
+                      placeholder={libraryFilterArea ? "Buscar video dentro del área..." : "Buscar video en la biblioteca..."}
+                    />
+                  </label>
+
                   <div className="library-grid">
-                    {videos
-                      .filter(v => {
-                        if (libraryFilterSubarea) return v.subarea_id === libraryFilterSubarea.id;
-                        if (libraryFilterArea) {
-                          const subIds = libraryFilterArea.subareas.map(s => s.id);
-                          return subIds.includes(v.subarea_id);
-                        }
-                        return true;
-                      })
-                      .map((video) => (
-                      <article key={video.id} className={cx("library-card", selectedId === video.id && "active")} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, gap: 0 }}>
-                        <div style={{ backgroundColor: 'var(--surface-soft)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid var(--line)', position: 'relative' }}>
-                          <div style={{ background: 'white', padding: '12px', borderRadius: '50%', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-                            <PlayCircle size={32} color="var(--green-600)" />
+                    {libraryVisibleVideos.length === 0 && (
+                      <EmptyState
+                        icon={Search}
+                        title="Sin videos encontrados"
+                        body={librarySearchTerm ? "Prueba con otro nombre o limpia la búsqueda." : "No hay videos registrados en esta selección."}
+                      />
+                    )}
+                    {libraryVisibleVideos.map((video) => (
+                      <article key={video.id} className={cx("library-card", selectedId === video.id && "active")}>
+                        <div className="library-video-preview">
+                          <div className="library-video-fallback">
+                            <PlayCircle size={34} />
                           </div>
-                          <div style={{ position: 'absolute', top: '12px', right: '12px' }}>
+                          <img
+                            className="library-video-thumb"
+                            src={`${API_BASE_URL}/videos/${video.id}/thumbnail`}
+                            alt=""
+                            loading="lazy"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                          <div className="library-video-status">
                             <StatusPill status={video.status} stage={video.processing_stage} />
                           </div>
-                          <div style={{ position: 'absolute', bottom: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
+                          <div className="library-video-duration">
                             {formatSeconds(video.duration_seconds)}
                           </div>
                         </div>
 
-                        <div style={{ padding: '16px', minWidth: 0 }}>
+                        <div className="library-card-body">
                           <h3 style={{ margin: '0 0 12px 0', fontSize: '15px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--ink-900)' }} title={video.original_filename}>
                             {video.original_filename}
                           </h3>
@@ -1336,12 +1382,7 @@ function App() {
                               <Clock3 size={14} /> {formatDate(video.created_at)}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <Database size={14} /> 
-                              {video.subarea_id ? (() => {
-                                let subName = "Sin área";
-                                areas.forEach(a => a.subareas.forEach(s => { if(s.id === video.subarea_id) subName = `${a.name} > ${s.name}`; }));
-                                return subName;
-                              })() : "Sin área asignada"}
+                              <AreaAssignmentChip label={getVideoAreaLabel(video)} unassigned={!video.subarea_id} />
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <FileText size={14} /> {video.segment_count} segmentos indexados
@@ -1789,27 +1830,11 @@ function App() {
                 </div>
                 
                 {hasPermission("generate_manual") && (
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <div className="segmented-control" style={{ marginRight: '8px' }}>
-                      <button
-                        type="button"
-                        className={cx(manualMode === "extractive" && "active")}
-                        onClick={() => setManualMode("extractive")}
-                      >
-                        <FileText size={16} />
-                        Sin LLM
-                      </button>
-                      <button
-                        type="button"
-                        className={cx(manualMode === "llm" && "active")}
-                        onClick={() => setManualMode("llm")}
-                      >
-                        <Bot size={16} />
-                        LLM local
-                      </button>
+                  <div className="manual-controls">
+                    <div className="manual-mode-chip">
+                      <Bot size={16} />
+                      LLM local
                     </div>
-
-
                     <button
                       className="primary-button"
                       type="button"
@@ -1828,7 +1853,7 @@ function App() {
                   <EmptyState
                     icon={BookOpen}
                     title="Sin manuales"
-                    body="Genera una versión extractiva o una versión redactada con LLM local."
+                    body="Genera un manual profesional redactado con LLM local."
                   />
                 ) : (
                   manuals.map((manual) => (
@@ -1840,7 +1865,7 @@ function App() {
                         <div>
                           <strong>{manual.title}</strong>
                           <span>
-                            {manual.mode === "llm" ? `LLM · ${manual.model || "modelo local"}` : "Extractivo sin LLM"}
+                            {manual.mode === "llm" ? `LLM · ${manual.model || "modelo local"}` : "Manual histórico"}
                             {" · "}
                             {manual.section_count} secciones · {manual.word_count} palabras
                             {manual.screenshot_count ? ` · ${manual.screenshot_count} capturas` : ""}
@@ -1986,7 +2011,7 @@ function App() {
                       <input
                         value={question}
                         onChange={(event) => setQuestion(event.target.value)}
-                        placeholder="Pregunta sobre el video..."
+                        placeholder="Pregunta algo del video o escribe un término para encontrarlo"
                         disabled={selectedVideo.status !== "ready"}
                       />
                       <button className="send-button" type="submit" disabled={selectedVideo.status !== "ready" || loading}>
@@ -2004,8 +2029,8 @@ function App() {
                     {!answer && selectedVideo.status === "ready" && (
                       <EmptyState
                         icon={Bot}
-                        title="Haz una pregunta"
-                        body="El asistente responderá citando el fragmento del video donde encontró evidencia."
+                        title="Busca dentro del video"
+                        body="Escribe una pregunta o una palabra clave; el asistente responderá con el fragmento exacto donde encontró evidencia."
                       />
                     )}
 
@@ -2104,6 +2129,7 @@ function App() {
                     <p>
                       {formatSeconds(selectedVideo.duration_seconds)} · {selectedVideo.segment_count} segmentos · {selectedVideo.chunk_count} fragmentos indexados
                     </p>
+                    <AreaAssignmentChip label={getVideoAreaLabel(selectedVideo)} unassigned={!selectedVideo.subarea_id} />
                   </div>
                 </div>
 
@@ -2119,9 +2145,9 @@ function App() {
                     <small>{selectedVideo.progress_updated_at ? `Actualizado ${formatDate(selectedVideo.progress_updated_at)}` : "Sin avance"}</small>
                   </div>
                   <div>
-                    <span>Audio</span>
-                    <strong>{selectedVideo.audio_extraction_backend || "Pendiente"}</strong>
-                    <small>{selectedVideo.language ? `Idioma ${selectedVideo.language}` : "Idioma por detectar"}</small>
+                    <span>Transcripción</span>
+                    <strong>{formatTranscriptionEngine(selectedVideo)}</strong>
+                    <small>Idioma: {formatLanguage(selectedVideo.language)}</small>
                   </div>
                   <div>
                     <span>Manuales</span>
@@ -2141,6 +2167,68 @@ function App() {
                   </button>
                 </div>
               </section>
+            )}
+
+            {isUploadModalOpen && (
+              <div className="modal-overlay" onClick={closeUploadModal}>
+                <div className="modal-content upload-modal" onClick={e => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <div className="modal-title-group">
+                      <UploadCloud size={24} />
+                      <div>
+                        <h2>Subir video</h2>
+                        <p>Selecciona el archivo y asígnalo al área correspondiente.</p>
+                      </div>
+                    </div>
+                    <button className="close-btn" type="button" onClick={closeUploadModal} disabled={uploading}>
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <form className="upload-modal-form" onSubmit={handleUploadSubmit}>
+                    <label className="upload-file-drop">
+                      <FileVideo size={24} />
+                      <span>{uploadFile ? uploadFile.name : "Seleccionar archivo de video"}</span>
+                      <small>{uploadFile ? `${(uploadFile.size / (1024 * 1024)).toFixed(1)} MB` : "Formatos compatibles: MP4, MKV y otros formatos de video"}</small>
+                      <input
+                        type="file"
+                        accept="video/*,audio/*,.mkv,.mvk"
+                        onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                        disabled={uploading}
+                      />
+                    </label>
+
+                    <label className="field-group">
+                      <span>Área asignada</span>
+                      <select
+                        value={uploadSubareaId}
+                        onChange={e => setUploadSubareaId(e.target.value)}
+                        disabled={uploading || availableSubareas.length === 0}
+                        required={uploadRequiresAssignment}
+                      >
+                        <option value="">{availableSubareas.length === 0 ? "Sin áreas configuradas" : "Seleccionar área y subárea"}</option>
+                        {areas.map(area => (
+                          <optgroup key={area.id} label={area.name}>
+                            {area.subareas.map(sub => (
+                              <option key={sub.id} value={sub.id}>{sub.name}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="modal-actions">
+                      <button className="secondary-button" type="button" onClick={closeUploadModal} disabled={uploading}>
+                        Cancelar
+                      </button>
+                      <button className="primary-button" type="submit" disabled={uploading || !uploadFile || (uploadRequiresAssignment && !uploadSubareaId)}>
+                        {uploading ? <Loader2 className="spin" size={17} /> : <UploadCloud size={17} />}
+                        Subir video
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
             )}
 
             {editingVideo && (

@@ -23,6 +23,50 @@ class ManualScreenshot:
     caption: str
 
 
+def extract_video_thumbnail(
+    *,
+    video_path: Path,
+    output_path: Path,
+    ffmpeg_bin: str,
+    timestamp_seconds: float,
+    width: int,
+) -> Path:
+    ffmpeg_status = get_ffmpeg_status(ffmpeg_bin)
+    if not ffmpeg_status["available"]:
+        raise ScreenshotError(str(ffmpeg_status["error"]))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        str(ffmpeg_status["path"]),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{max(0.0, timestamp_seconds):.3f}",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale={width}:-2",
+        "-q:v",
+        "4",
+        str(output_path),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=30)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        raise ScreenshotError(f"ffmpeg no pudo generar la miniatura: {detail}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ScreenshotError("ffmpeg excedio el tiempo limite generando la miniatura.") from exc
+
+    if not output_path.exists() or output_path.stat().st_size <= 0:
+        raise ScreenshotError("ffmpeg no genero una miniatura valida.")
+    return output_path
+
+
 def extract_manual_screenshots(
     *,
     video_path: Path,
