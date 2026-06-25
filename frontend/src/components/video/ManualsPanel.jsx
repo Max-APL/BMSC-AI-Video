@@ -40,6 +40,8 @@ function manualLiveMessage(metadata) {
 export function ManualsPanel({
   video,
   manuals,
+  manualQualityMode,
+  setManualQualityMode,
   manualPreview,
   generatingManual,
   loading,
@@ -65,6 +67,25 @@ export function ManualsPanel({
             <div className="manual-mode-chip">
               <Bot size={16} />
               LLM local
+            </div>
+
+            <div className="segmented-control" aria-label="Calidad de generación">
+              <button
+                type="button"
+                className={manualQualityMode === "fast" ? "active" : ""}
+                onClick={() => setManualQualityMode("fast")}
+                disabled={generatingManual}
+              >
+                Rápido
+              </button>
+              <button
+                type="button"
+                className={manualQualityMode === "quality" ? "active" : ""}
+                onClick={() => setManualQualityMode("quality")}
+                disabled={generatingManual}
+              >
+                Calidad
+              </button>
             </div>
 
             <button
@@ -105,6 +126,7 @@ export function ManualsPanel({
                     {manual.mode === "llm"
                       ? `LLM · ${manual.model || "modelo local"}`
                       : "Manual histórico"}
+                    {manual.quality_mode === "quality" ? " · Calidad" : " · Rápido"}
                     {" · "}
                     {manual.section_count} secciones · {manual.word_count} palabras
                     {manual.screenshot_count

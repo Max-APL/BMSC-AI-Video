@@ -218,7 +218,16 @@ def build_llm_manual(
             preview = "\n\n".join(lines + ["## Procedimiento detallado"] + generated_sections)
             on_progress(preview.strip() + "\n", block.index, len(blocks), "")
 
-    lines.extend(build_professional_overview(metadata).splitlines())
+    try:
+        overview = client.generate_overview(
+            title=title,
+            transcript_excerpt=build_transcript_excerpt(segments),
+            section_summaries="\n\n".join(generated_sections),
+        )
+        lines.extend(normalize_overview_markdown(overview).splitlines())
+    except Exception as exc:
+        log_event(f"No se pudo generar overview LLM; usando fallback deterministico: {exc}", metadata.id)
+        lines.extend(build_professional_overview(metadata).splitlines())
     lines.extend(["", "## Procedimiento detallado", ""])
     for generated_section in generated_sections:
         lines.append(generated_section)

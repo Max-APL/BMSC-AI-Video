@@ -45,6 +45,7 @@ function mergeManualsWithActiveState(serverManuals, previousManuals, activeManua
 export function useManuals(videoId, { setError, setLoading } = {}) {
   const [manuals, setManuals] = useState([]);
   const [manualMode, setManualMode] = useState("llm");
+  const [manualQualityMode, setManualQualityMode] = useState("quality");
   const [manualPreview, setManualPreview] = useState(null);
   const [manualToDelete, setManualToDelete] = useState(null);
   const [generatingManual, setGeneratingManual] = useState(false);
@@ -54,20 +55,12 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
       if (!videoId) return;
       try {
         const data = await listManuals(videoId);
-        setManuals((prev) => {
-          return mergeManualsWithActiveState(data, prev, manualPreview?.metadata);
-        });
+        setManuals((prev) => mergeManualsWithActiveState(data, prev, null));
       } catch (err) {
         if (!silent && setError) setError(err.message);
       }
     },
-    [
-      videoId,
-      manualPreview?.metadata?.id,
-      manualPreview?.metadata?.status,
-      manualPreview?.metadata?.progress,
-      setError,
-    ]
+    [videoId, setError]
   );
 
   // Initial load & reset when videoId changes
@@ -87,51 +80,7 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     return () => window.clearInterval(interval);
   }, [videoId, loadManuals]);
 
-  // Refresh preview when manual list status/progress changes
-  useEffect(() => {
-    if (!videoId) return;
-
-    const trackedId =
-      manualPreview?.metadata?.id ??
-      manuals.find((m) => GENERATING_STATUSES.has(m.status))?.id;
-    if (!trackedId) return;
-
-    const listEntry = manuals.find((m) => m.id === trackedId);
-    const previewStatus = manualPreview?.metadata?.status;
-    const previewProgress = manualPreview?.metadata?.progress;
-
-    const isGenerating = listEntry
-      ? GENERATING_STATUSES.has(listEntry.status)
-      : GENERATING_STATUSES.has(previewStatus);
-    const statusChanged = listEntry && listEntry.status !== previewStatus;
-    const progressChanged = listEntry && listEntry.progress !== previewProgress;
-
-    if (!isGenerating && !statusChanged && !progressChanged) return;
-
-    let cancelled = false;
-    getManual(videoId, trackedId, true)
-      .then((data) => {
-        if (!cancelled) {
-          setManualPreview(data);
-          setManuals((prev) => upsertManual(prev, data.metadata));
-        }
-      })
-      .catch((err) => {
-        console.error("manual preview refresh failed", err);
-        if (!cancelled && listEntry) {
-          setManualPreview((prev) => ({
-            metadata: listEntry,
-            content: prev?.content ?? "",
-          }));
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [manuals, videoId, manualPreview?.metadata?.id, manualPreview?.metadata?.status, manualPreview?.metadata?.progress]);
-
-  // Keep the selected in-progress manual fresh even if the list response is stale.
+  // Keep only the selected in-progress manual fresh.
   useEffect(() => {
     if (!videoId || !manualPreview?.metadata?.id) return;
     if (!GENERATING_STATUSES.has(manualPreview.metadata.status)) return;
@@ -149,7 +98,7 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     };
 
     refreshPreview();
-    const interval = window.setInterval(refreshPreview, 2500);
+    const interval = window.setInterval(refreshPreview, 3500);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
@@ -162,7 +111,7 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     if (setError) setError("");
     setManualPreview(null);
     try {
-      const manual = await generateManual(videoId, manualMode);
+      const manual = await generateManual(videoId, manualMode, manualQualityMode);
       setManualPreview({ metadata: manual, content: "" });
       setManuals((prev) => upsertManual(prev, manual));
       await loadManuals({ silent: true });
@@ -171,7 +120,7 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     } finally {
       setGeneratingManual(false);
     }
-  }, [videoId, manualMode, setError, loadManuals]);
+  }, [videoId, manualMode, manualQualityMode, setError, loadManuals]);
 
   const handlePreviewManual = useCallback(
     async (manual) => {
@@ -227,6 +176,8 @@ export function useManuals(videoId, { setError, setLoading } = {}) {
     manuals,
     manualMode,
     setManualMode,
+    manualQualityMode,
+    setManualQualityMode,
     manualPreview,
     setManualPreview,
     manualToDelete,

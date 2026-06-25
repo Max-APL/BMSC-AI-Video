@@ -4,9 +4,10 @@ import { apiRequest } from "./apiClient";
 export const listManuals = (videoId) =>
   apiRequest(`/videos/${videoId}/manuals`);
 
-export const generateManual = (videoId, mode) => {
+export const generateManual = (videoId, mode, qualityMode = "fast") => {
   const body = {
     mode,
+    quality_mode: qualityMode,
     format: "markdown",
     include_timestamps: true,
     include_screenshots: true,

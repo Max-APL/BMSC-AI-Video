@@ -28,7 +28,7 @@ from .screenshots import ScreenshotError
 from .service import VideoService
 from .storage import VideoStorage
 from .transcription import FasterWhisperTranscriber
-from .database import Base, engine
+from .database import Base, engine, ensure_sqlite_schema_columns
 
 from .auth import get_current_user, require_permission
 from .db_models import DBUser
@@ -64,6 +64,7 @@ service = VideoService(settings, storage, transcriber, search_engine)
 @app.on_event("startup")
 def recover_interrupted_processing() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_sqlite_schema_columns()
     
     # Create default roles and admin user if not exists
     from sqlalchemy.orm import Session
@@ -117,6 +118,7 @@ def recover_interrupted_processing() -> None:
     log_event(
         "Backend startup "
         f"storage_dir={settings.storage_dir} "
+        f"inference_device={settings.inference_device} "
         f"whisper_model={settings.whisper_model} "
         f"device={settings.whisper_device} "
         f"compute_type={settings.whisper_compute_type} "
@@ -127,6 +129,7 @@ def recover_interrupted_processing() -> None:
         f"whisper_num_workers={settings.whisper_num_workers} "
         f"whisper_chunk_workers={settings.whisper_chunk_workers} "
         f"llm_ctx={settings.llm_num_ctx} "
+        f"llm_gpu_layers={settings.llm_n_gpu_layers} "
         f"llm_threads={settings.llm_n_threads or 'auto'} "
         f"llm_batch={settings.llm_n_batch}"
     )

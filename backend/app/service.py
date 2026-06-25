@@ -20,18 +20,19 @@ from .language_detection import resolve_transcript_language
 from .manual_exports import ManualExportError, export_manual
 from .manual_generation import (
     build_extractive_manual,
-    build_llm_manual,
     build_text_blocks,
     build_time_blocks,
     compact_datetime_lapaz,
     count_words,
     manual_title,
 )
+from .manual_pipeline import build_fast_llm_manual, build_quality_llm_manual
 from .models import (
     AnswerResponse,
     AnswerMode,
     ManualMetadata,
     ManualMode,
+    ManualQualityMode,
     ManualRequest,
     ManualResponse,
     ManualStatus,
@@ -53,6 +54,7 @@ from .transcription import (
     get_ffmpeg_status,
     get_wav_duration,
 )
+from .visual_analysis import analyze_manual_screenshots
 
 
 SUPPORTED_MEDIA_EXTENSIONS = {
@@ -332,6 +334,7 @@ class VideoService:
             id=manual_id,
             video_id=video_id,
             mode=request.mode,
+            quality_mode=request.quality_mode,
             status=ManualStatus.queued,
             format=request.format,
             provider=provider,
@@ -397,6 +400,7 @@ class VideoService:
                 screenshot_max_count = self.resolve_manual_screenshot_max_count(
                     metadata.mode,
                     manual_blocks,
+                    metadata.quality_mode,
                 )
                 screenshot_targets = build_screenshot_targets(
                     segments=segments,
@@ -420,6 +424,19 @@ class VideoService:
                     width=self.settings.manual_screenshot_width,
                     max_count=screenshot_max_count,
                 )
+                if metadata.mode == ManualMode.llm:
+                    screenshots, visual_evidence = analyze_manual_screenshots(
+                        screenshots,
+                        settings=self.settings,
+                        quality_mode=metadata.quality_mode,
+                    )
+                    self.storage.save_manual_artifact(
+                        video_id,
+                        manual_id,
+                        "visual_evidence.json",
+                        [item.to_dict() for item in visual_evidence],
+                    )
+
                 for screenshot in screenshots:
                     screenshots_by_block.setdefault(screenshot.block_index, []).append(
                         (screenshot.relative_path, screenshot.caption)
@@ -493,7 +510,16 @@ class VideoService:
                         video_id,
                     )
 
-                result = build_llm_manual(
+                builder = (
+                    build_quality_llm_manual
+                    if metadata.quality_mode == ManualQualityMode.quality
+                    else build_fast_llm_manual
+                )
+
+                def write_manual_artifact(filename: str, payload) -> None:
+                    self.storage.save_manual_artifact(video_id, manual_id, filename, payload)
+
+                result = builder(
                     video,
                     segments,
                     settings=self.settings,
@@ -503,6 +529,7 @@ class VideoService:
                     generated_at=metadata.created_at,
                     screenshots_by_block=screenshots_by_block,
                     on_progress=save_llm_progress,
+                    write_artifact=write_manual_artifact,
                 )
             else:
                 raise RuntimeError(f"Modo de manual no soportado: {metadata.mode}")
@@ -543,6 +570,7 @@ class VideoService:
         self,
         mode: ManualMode,
         manual_blocks: List,
+        quality_mode: ManualQualityMode = ManualQualityMode.fast,
     ) -> int:
         if not manual_blocks:
             return 0
@@ -550,7 +578,9 @@ class VideoService:
             configured_limit = self.settings.manual_llm_screenshot_max_count
             if configured_limit > 0:
                 return configured_limit
-            return 0
+            if quality_mode == ManualQualityMode.quality:
+                return self.settings.manual_quality_max_images
+            return self.settings.manual_fast_max_images
 
         configured_limit = self.settings.manual_screenshot_max_count
         if configured_limit > 0:
@@ -714,6 +744,7 @@ class VideoService:
     def get_system_dependencies(self) -> SystemDependenciesResponse:
         return SystemDependenciesResponse(
             ffmpeg=get_ffmpeg_status(self.settings.ffmpeg_bin),
+            inference_device=self.settings.inference_device,
             whisper_model=self.settings.whisper_model,
             whisper_device=self.settings.whisper_device,
             whisper_compute_type=self.settings.whisper_compute_type,
