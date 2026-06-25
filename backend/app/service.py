@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import mimetypes
 import re
+import sys
 import traceback
 import unicodedata
 import uuid
+import datetime
 from urllib.parse import unquote
 from pathlib import Path
 from threading import Lock
@@ -40,6 +42,7 @@ from .models import (
     SearchMatch,
     SystemDependenciesResponse,
     TranscriptResponse,
+    TranscriptSegment,
     VideoMetadata,
     VideoStatus,
 )
@@ -47,6 +50,7 @@ from .search import TfidfSearchEngine
 from .screenshots import build_screenshot_targets, extract_manual_screenshots, extract_video_thumbnail
 from .storage import VideoStorage, utc_now
 from .timecodes import format_timecode
+from .transcript_normalizer import normalize_transcript_segments
 from .transcription import (
     FasterWhisperTranscriber,
     TranscriptionError,
@@ -379,6 +383,11 @@ class VideoService:
             if not segments:
                 raise RuntimeError("No hay transcripcion disponible para generar el manual.")
 
+            # Normalizamos los errores ASR antes de usar los segmentos
+            segments = normalize_transcript_segments(
+                segments, terminology_hints=self.settings.manual_terminology_hints
+            )
+
             screenshots_by_block: Dict[int, List[Tuple[str, str]]] = {}
             if metadata.include_screenshots:
                 self.storage.update_manual_metadata(
@@ -531,6 +540,30 @@ class VideoService:
                     on_progress=save_llm_progress,
                     write_artifact=write_manual_artifact,
                 )
+
+                if metadata.processing_started_at:
+                    start_dt = datetime.datetime.fromisoformat(metadata.processing_started_at.replace("Z", "+00:00"))
+                    end_dt = datetime.datetime.now(datetime.timezone.utc)
+                    generation_time = (end_dt - start_dt).total_seconds()
+                else:
+                    generation_time = 0.0
+                    
+                runtime_report = {
+                    "inference_device": self.settings.inference_device,
+                    "whisper_model": self.settings.whisper_model,
+                    "whisper_device": self.settings.whisper_device,
+                    "whisper_compute_type": self.settings.whisper_compute_type,
+                    "llm_model": self.settings.llm_model,
+                    "llm_n_gpu_layers": self.settings.llm_n_gpu_layers,
+                    "llm_temperature": self.settings.llm_temperature,
+                    "llm_num_ctx": self.settings.llm_num_ctx,
+                    "manual_vision_model": self.settings.manual_vision_model,
+                    "generation_time_seconds": round(generation_time, 2),
+                    "environment": sys.executable,
+                    "python_version": sys.version.split()[0]
+                }
+                write_manual_artifact("runtime_report.json", runtime_report)
+
             else:
                 raise RuntimeError(f"Modo de manual no soportado: {metadata.mode}")
 

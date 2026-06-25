@@ -73,9 +73,9 @@ def analyze_manual_screenshots(
 
         if keep and quality_mode == ManualQualityMode.quality:
             visual_description = get_vision_analyzer(settings).describe_image(screenshot.path)
-            if visual_description.strip().upper().startswith("SIN_APORTE"):
+            if not is_vlm_description_useful(visual_description):
                 keep = False
-                reason = "modelo visual no encontro aporte"
+                reason = "modelo visual devolvio descripcion inútil o sin aporte"
 
         final_quality = ImageQuality(
             sharpness=quality.sharpness,
@@ -180,14 +180,29 @@ def clamp(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def is_vlm_description_useful(visual_description: Optional[str]) -> bool:
+    if not visual_description:
+        return False
+    desc_upper = visual_description.strip().upper()
+    gibberish_patterns = [
+        "SIN_APORTE",
+        "NO SE PUEDE UTILIZAR",
+        "NO DATA AVAILABLE",
+        "CARRO Y UN PISO",
+        "OPORTUNIDAD DE APORTE",
+        "OPORTUNA PARA UNA OPORTUNA",
+        "CAPTURA DE LA IMAGEM",
+        "PUNTUACIÓN QUE SE HA UTILIZADO",
+    ]
+    for pattern in gibberish_patterns:
+        if pattern in desc_upper:
+            return False
+    return True
+
+
 def enhance_caption(caption: str, quality: ImageQuality) -> str:
-    details = quality.visual_description
-    if not details:
-        return caption
-    cleaned = " ".join(details.split()).strip(" -")
-    if not cleaned:
-        return caption
-    if len(cleaned) > 180:
-        cleaned = cleaned[:177].rstrip(" ,.;:") + "..."
-    prefix = caption.split(" - ", 1)[0]
-    return f"{prefix} - {cleaned}"
+    """
+    Preserves the original transcript-based caption instead of destructively
+    replacing it with VLM gibberish.
+    """
+    return caption
