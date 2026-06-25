@@ -54,6 +54,8 @@ export function VideoDetailPage() {
     manuals,
     manualMode,
     setManualMode,
+    manualQualityMode,
+    setManualQualityMode,
     manualPreview,
     manualToDelete,
     setManualToDelete,
@@ -312,6 +314,8 @@ export function VideoDetailPage() {
           manuals={manuals}
           manualMode={manualMode}
           setManualMode={setManualMode}
+          manualQualityMode={manualQualityMode}
+          setManualQualityMode={setManualQualityMode}
           manualPreview={manualPreview}
           generatingManual={generatingManual}
           loading={loading}

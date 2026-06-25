@@ -78,6 +78,9 @@ class VideoStorage:
     def manual_screenshot_path(self, video_id: str, manual_id: str, filename: str) -> Path:
         return self.manual_screenshots_dir(video_id, manual_id) / filename
 
+    def manual_artifact_path(self, video_id: str, manual_id: str, filename: str) -> Path:
+        return self.manual_assets_dir(video_id, manual_id) / "artifacts" / filename
+
     async def create_video(self, upload: UploadFile) -> VideoMetadata:
         original_filename = sanitize_filename(upload.filename or "video")
         suffix = Path(original_filename).suffix.lower()
@@ -204,6 +207,9 @@ class VideoStorage:
         temp_path = path.with_suffix(path.suffix + ".tmp")
         temp_path.write_text(content, encoding="utf-8")
         self._replace_with_retry(temp_path, path)
+
+    def save_manual_artifact(self, video_id: str, manual_id: str, filename: str, payload) -> None:
+        self._write_json(self.manual_artifact_path(video_id, manual_id, filename), payload)
 
     def load_manual_content(self, video_id: str, manual_id: str) -> str:
         path = self.manual_content_path(video_id, manual_id)

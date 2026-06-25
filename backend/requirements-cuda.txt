@@ -1,0 +1,28 @@
+# CUDA backend environment.
+#
+# Install this file in the virtualenv that runs uvicorn:
+#   python -m venv .venv-cuda
+#   source .venv-cuda/bin/activate
+#   python -m pip install --upgrade pip setuptools wheel
+#   CMAKE_ARGS="-DGGML_CUDA=on" FORCE_CMAKE=1 python -m pip install --force-reinstall --no-cache-dir --no-binary llama-cpp-python -r requirements-cuda.txt
+#
+# Validate llama.cpp GPU support after install:
+#   python -c "from llama_cpp import llama_supports_gpu_offload; print(llama_supports_gpu_offload())"
+#
+# It must print True. If it prints False, llama-cpp-python was installed without CUDA.
+
+-r requirements.txt
+
+# Build tools needed to compile llama-cpp-python with CUDA inside this virtualenv.
+cmake>=3.27
+ninja>=1.11
+
+# CUDA runtime libraries used by CTranslate2/faster-whisper on Linux.
+# A compatible NVIDIA driver must already be installed on the host.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+
+# Local GGUF LLM runtime. This must be built with GGML_CUDA enabled by the
+# install command above.
+--no-binary llama-cpp-python
+llama-cpp-python>=0.3.0

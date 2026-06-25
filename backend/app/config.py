@@ -7,6 +7,8 @@ from typing import Optional, Tuple
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+os.environ.setdefault("HF_HOME", str((BASE_DIR / "models_cache" / "huggingface").resolve()))
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 try:
     from dotenv import load_dotenv
@@ -46,6 +48,53 @@ def _env_bool(name: str, default: bool) -> bool:
     if not value:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configured_inference_device() -> Optional[str]:
+    value = os.getenv("INFERENCE_DEVICE")
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"cpu", "cuda"}:
+        return normalized
+    return "cpu"
+
+
+def _default_whisper_device() -> str:
+    return (
+        _configured_inference_device()
+        or os.getenv("WHISPER_DEVICE", "cpu").strip()
+        or "cpu"
+    )
+
+
+def _default_whisper_compute_type() -> str:
+    value = os.getenv("WHISPER_COMPUTE_TYPE")
+    if value and value.strip():
+        return value.strip()
+    return "float16" if _configured_inference_device() == "cuda" else "int8"
+
+
+def _default_llm_gpu_layers() -> int:
+    device = _configured_inference_device()
+    if device == "cpu":
+        return 0
+    if device == "cuda":
+        return -1
+    return _env_int("LLM_N_GPU_LAYERS", -1)
+
+
+def _effective_inference_device() -> str:
+    device = _configured_inference_device()
+    if device:
+        return device
+    whisper_device = _default_whisper_device().strip().lower()
+    llm_gpu_layers = _default_llm_gpu_layers()
+    if whisper_device == "cpu" and llm_gpu_layers == 0:
+        return "cpu"
+    if whisper_device == "cuda" and llm_gpu_layers != 0:
+        return "cuda"
+    return "custom"
 
 
 def _env_path(name: str) -> Optional[Path]:
@@ -128,9 +177,10 @@ class Settings:
     storage_dir: Path = _env_path_with_default("VIDEO_STORAGE_DIR", BASE_DIR / "storage")
     ffmpeg_bin: str = os.getenv("FFMPEG_BIN", "ffmpeg").strip().strip("\"'")
 
+    inference_device: str = _effective_inference_device()
     whisper_model: str = os.getenv("WHISPER_MODEL", "base")
-    whisper_device: str = os.getenv("WHISPER_DEVICE", "cpu")
-    whisper_compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+    whisper_device: str = _default_whisper_device()
+    whisper_compute_type: str = _default_whisper_compute_type()
     whisper_language: Optional[str] = _env_optional_language("WHISPER_LANGUAGE")
     whisper_model_dir: Optional[Path] = _env_path("WHISPER_MODEL_DIR")
     whisper_audio_chunk_seconds: int = _env_int("WHISPER_AUDIO_CHUNK_SECONDS", 300)
@@ -154,11 +204,18 @@ class Settings:
     manual_screenshot_max_count: int = _env_int("MANUAL_SCREENSHOT_MAX_COUNT", 0)
     manual_llm_screenshot_max_count: int = _env_int("MANUAL_LLM_SCREENSHOT_MAX_COUNT", 0)
     manual_screenshot_width: int = _env_int("MANUAL_SCREENSHOT_WIDTH", 1280)
+    manual_quality_mode_default: str = os.getenv("MANUAL_QUALITY_MODE_DEFAULT", "fast").strip().lower()
+    manual_quality_max_loops: int = _env_int("MANUAL_QUALITY_MAX_LOOPS", 1)
+    manual_fast_max_images: int = _env_int("MANUAL_FAST_MAX_IMAGES", 8)
+    manual_quality_max_images: int = _env_int("MANUAL_QUALITY_MAX_IMAGES", 16)
+    manual_vision_model: str = os.getenv("MANUAL_VISION_MODEL", "HuggingFaceTB/SmolVLM-500M-Instruct").strip()
+    manual_min_image_quality_score: float = _env_float("MANUAL_MIN_IMAGE_QUALITY_SCORE", 0.35)
+    manual_min_review_score: float = _env_float("MANUAL_MIN_REVIEW_SCORE", 0.78)
 
     llm_provider: str = os.getenv("LLM_PROVIDER", "llama_cpp")
     llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")
     llm_model_path: Optional[Path] = _env_path("LLM_MODEL_PATH")
-    llm_n_gpu_layers: int = _env_int("LLM_N_GPU_LAYERS", -1)
+    llm_n_gpu_layers: int = _default_llm_gpu_layers()
     llm_n_threads: int = _env_auto_int("LLM_N_THREADS", _default_model_threads())
     llm_n_threads_batch: int = _env_auto_int("LLM_N_THREADS_BATCH", _default_batch_threads())
     llm_n_batch: int = _env_auto_int("LLM_N_BATCH", _default_llm_batch())

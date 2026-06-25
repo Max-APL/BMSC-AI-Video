@@ -337,6 +337,21 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
+For a separate CUDA backend environment, create a second virtualenv and install
+the CUDA requirements from the backend directory:
+
+```bash
+cd backend
+python -m venv .venv-cuda
+source .venv-cuda/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+CMAKE_ARGS="-DGGML_CUDA=on" FORCE_CMAKE=1 python -m pip install --force-reinstall --no-cache-dir --no-binary llama-cpp-python -r requirements-cuda.txt
+python -c "from llama_cpp import llama_supports_gpu_offload; print(llama_supports_gpu_offload())"
+```
+
+The validation command must print `True`. Then set `INFERENCE_DEVICE=cuda` in
+`backend/.env` and start `uvicorn` from `.venv-cuda`.
+
 Start the server (do **not** use `--reload` in production — it interrupts background transcription tasks):
 
 ```bash
@@ -376,10 +391,12 @@ All settings are read from `backend/.env`. See `.env.example` for a full templat
 | Variable | Default | Description |
 |---|---|---|
 | `VIDEO_STORAGE_DIR` | `./storage` | Directory for video files, audio, and indexes |
+| `HF_HOME` | `./models_cache/huggingface` | Local Hugging Face cache for offline/on-prem model downloads |
 | `FFMPEG_BIN` | `ffmpeg` | Explicit path to ffmpeg binary |
+| `INFERENCE_DEVICE` | `cpu` | Single backend inference switch: `cpu` or `cuda` |
 | `WHISPER_MODEL` | `base` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3` |
-| `WHISPER_DEVICE` | `cpu` | `cpu` or `cuda` |
-| `WHISPER_COMPUTE_TYPE` | `int8` | `int8`, `float16`, `float32` |
+| `WHISPER_DEVICE` | derived | Advanced override. Leave empty to use `INFERENCE_DEVICE` |
+| `WHISPER_COMPUTE_TYPE` | derived | Advanced override. Defaults to `int8` on CPU and `float16` on CUDA |
 | `WHISPER_LANGUAGE` | *(auto-detect)* | Force language code (e.g. `es`) |
 | `WHISPER_AUDIO_CHUNK_SECONDS` | `300` | Audio chunk size to limit RAM usage |
 | `WHISPER_BEAM_SIZE` | `5` | Beam search width (lower = faster, less accurate) |
@@ -389,13 +406,46 @@ All settings are read from `backend/.env`. See `.env.example` for a full templat
 | `WHISPER_CHUNK_WORKERS` | `1` | Parallel audio chunk transcription workers |
 | `SEARCH_CHUNK_SECONDS` | `14` | Transcript segment length for search index |
 | `SEARCH_CHUNK_MAX_CHARS` | `320` | Maximum characters per search chunk |
+| `MANUAL_QUALITY_MODE_DEFAULT` | `fast` | Default manual profile when the client does not send one: `fast` or `quality` |
+| `MANUAL_QUALITY_MAX_LOOPS` | `1` | Maximum quality review/repair loops for quality mode (capped at 2) |
+| `MANUAL_FAST_MAX_IMAGES` | `8` | Default screenshot cap for fast LLM manuals |
+| `MANUAL_QUALITY_MAX_IMAGES` | `16` | Screenshot candidate cap for quality LLM manuals |
+| `MANUAL_VISION_MODEL` | `HuggingFaceTB/SmolVLM-500M-Instruct` | Hugging Face image-text model required by quality mode to validate screenshots |
 | `LLM_PROVIDER` | `llama_cpp` | Local LLM provider. Only `llama_cpp` is supported. |
+| `LLM_MODEL_REPO_ID` | `bartowski/Llama-3.2-3B-Instruct-GGUF` | Hugging Face repository used by `backend/download_models.py` for the GGUF model |
+| `LLM_MODEL_FILENAME` | `Llama-3.2-3B-Instruct-Q4_K_M.gguf` | GGUF filename downloaded by `backend/download_models.py` |
 | `LLM_MODEL_PATH` | *(none)* | Path to local GGUF model file |
-| `LLM_N_GPU_LAYERS` | `-1` | GPU layers for llama.cpp (`-1` = auto) |
+| `LLM_N_GPU_LAYERS` | derived | Advanced override. Defaults to `0` on CPU and `-1` on CUDA |
 | `LLM_NUM_CTX` | `4096` | llama.cpp context window |
 | `LLM_MAX_TOKENS_ANSWER` | `256` | Maximum answer tokens for Q&A |
 | `LLM_MAX_TOKENS_SECTION` | `1000` | Maximum tokens per generated manual section |
 | `CORS_ORIGINS` | `http://localhost:5173,...` | Comma-separated allowed origins |
+
+To move the backend between CPU and CUDA, change only `INFERENCE_DEVICE` in
+`backend/.env` and restart the backend:
+
+```env
+INFERENCE_DEVICE=cpu
+```
+
+```env
+INFERENCE_DEVICE=cuda
+```
+
+Download local models before running offline:
+
+```bash
+cd backend
+python download_models.py
+```
+
+The script reads `backend/.env`, downloads the configured faster-whisper model,
+the GGUF LLM, and the Hugging Face visual model used by quality mode into the
+local cache. Use `python download_models.py --dry-run` to inspect targets, or
+skip families with flags such as `--skip-vision` or `--skip-llm`.
+
+CUDA requires a CUDA-capable `faster-whisper` environment and a
+`llama-cpp-python` build with GPU offload enabled.
 
 ### Memory & Performance Guidance
 
@@ -408,7 +458,7 @@ graph LR
     E -->|Yes| F[Lower WHISPER_BEAM_SIZE to 1–2]
     E -->|No| G[Keep WHISPER_BEAM_SIZE at 5]
     H[Slow transcription] --> I{GPU available?}
-    I -->|Yes| J[Set WHISPER_DEVICE=cuda]
+    I -->|Yes| J[Set INFERENCE_DEVICE=cuda]
     I -->|No| K[Use smaller model:\ntiny or base]
 ```
 

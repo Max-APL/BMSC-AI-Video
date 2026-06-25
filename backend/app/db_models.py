@@ -68,6 +68,7 @@ class DBManualMetadata(Base):
     id = Column(String, primary_key=True, index=True)
     video_id = Column(String, ForeignKey("videos.id"), index=True, nullable=False)
     mode = Column(String, nullable=False)
+    quality_mode = Column(String, nullable=False, default="fast")
     status = Column(String, nullable=False)
     format = Column(String, default="markdown")
     provider = Column(String, nullable=True)
