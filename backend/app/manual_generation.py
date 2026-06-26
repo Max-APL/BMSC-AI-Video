@@ -218,7 +218,16 @@ def build_llm_manual(
             preview = "\n\n".join(lines + ["## Procedimiento detallado"] + generated_sections)
             on_progress(preview.strip() + "\n", block.index, len(blocks), "")
 
-    lines.extend(build_professional_overview(metadata).splitlines())
+    try:
+        overview = client.generate_overview(
+            title=title,
+            transcript_excerpt=build_transcript_excerpt(segments),
+            section_summaries="\n\n".join(generated_sections),
+        )
+        lines.extend(normalize_overview_markdown(overview).splitlines())
+    except Exception as exc:
+        log_event(f"No se pudo generar overview LLM; usando fallback deterministico: {exc}", metadata.id)
+        lines.extend(build_professional_overview(metadata).splitlines())
     lines.extend(["", "## Procedimiento detallado", ""])
     for generated_section in generated_sections:
         lines.append(generated_section)
@@ -383,12 +392,14 @@ class LlamaCppClient:
             else "No incluyas timestamps."
         )
         system_prompt = (
-            "Eres un redactor tecnico senior especializado en manuales operativos "
-            "corporativos. Transformas transcripciones en procedimientos claros, "
-            "formales y auditables. No inventes datos, no agregues requisitos no "
-            "mencionados y no uses informacion externa. Si un dato no aparece en la "
-            "transcripcion, omitelo. Corrige errores menores de transcripcion solo "
-            "cuando el contexto sea claro. Responde exclusivamente en Markdown simple."
+            "Eres un redactor tecnico senior especializado en manuales operativos corporativos. "
+            "Transformas transcripciones en procedimientos claros, formales y auditables. "
+            "ADVERTENCIA CRÍTICA: Estrictamente prohibido inventar pasos, menús, botones, "
+            "o secciones (como Instalación, Configuración, Mantenimiento) que no se escuchen "
+            "explícitamente en la transcripción. Si el texto es solo una charla introductoria, "
+            "NO inventes un procedimiento paso a paso. Limítate a la transcripción exacta. "
+            "Corrige errores menores de transcripción solo cuando el contexto sea claro. "
+            "Responde exclusivamente en Markdown simple sin vinetas dentro de pasos."
         )
         user_prompt = f"""
 Genera una seccion profesional para un manual operativo.
@@ -414,8 +425,9 @@ Parrafo breve que explique el proposito de esta parte.
 Instrucciones:
 - Escribe en espanol claro y formal.
 - No escribas como transcripcion y no pegues dialogos.
-- Cada paso debe estar soportado por la transcripcion del bloque.
-- Si el bloque solo contiene una explicacion, redacta descripcion y consideraciones; no inventes pasos.
+- Cada paso debe estar directamente justificado por el contenido hablado de la transcripcion.
+- ESTRICTAMENTE PROHIBIDO: Inventar procedimientos de Instalación, Descarga, Mantenimiento o Alertas si no se explican paso a paso en la transcripción.
+- Si el bloque solo contiene una explicacion o resumen, redacta un breve texto descriptivo; NO fuerces la creacion de pasos numerados ficticios.
 - Las capturas se insertan automaticamente; no las menciones en el texto.
 - No uses encabezados subrayados con === o ---.
 - No uses asteriscos para vinetas; usa guion medio.
@@ -452,8 +464,10 @@ Transcripcion:
     ) -> str:
         system_prompt = (
             "Eres un redactor tecnico senior. Generas la apertura formal de un "
-            "manual operativo corporativo a partir de evidencia textual. No inventes "
-            "informacion y no menciones IA, modelo ni transcripcion."
+            "manual operativo corporativo a partir de evidencia textual. "
+            "ADVERTENCIA CRÍTICA: Basa el alcance estrictamente en el contenido real del video. "
+            "No asumas que cubre 'toda la instalación y configuración' si el video es solo un resumen. "
+            "No inventes capacidades ni menciones IA, modelo o transcripcion."
         )
         user_prompt = f"""
 Redacta la parte inicial de un manual profesional.

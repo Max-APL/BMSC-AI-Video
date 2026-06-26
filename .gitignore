@@ -25,3 +25,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+
+# Videos for tests
+videos_test/

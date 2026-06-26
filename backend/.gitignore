@@ -2,11 +2,12 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.venv-gpu/
+.venv-cuda/
 .env
 .env.*
 !.env.example
-storage/*
-!storage/.gitkeep
+storage/
 models/
 .claude/
 
@@ -23,3 +24,6 @@ htmlcov/
 
 # OS
 .DS_Store
+
+# Models
+models_cache/

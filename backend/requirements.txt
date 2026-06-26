@@ -15,6 +15,15 @@ bcrypt
 pyjwt
 imageio-ffmpeg>=0.5.1
 huggingface_hub>=0.23.0
-# llama-cpp-python requires CUDA build — install separately:
+Pillow>=10.4.0
+torch>=2.3.0
+torchvision>=0.18.0
+transformers>=4.45.0
+sentencepiece>=0.2.0
+tiktoken>=0.7.0
+# llama-cpp-python is installed separately when local LLM generation is enabled.
+# CPU build:
+# pip install llama-cpp-python --force-reinstall --no-cache-dir
+# CUDA build, only for GPU deployments:
 # CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
 # llama-cpp-python>=0.3.0

@@ -74,6 +74,11 @@ class ManualMode(str, Enum):
     llm = "llm"
 
 
+class ManualQualityMode(str, Enum):
+    fast = "fast"
+    quality = "quality"
+
+
 class AnswerMode(str, Enum):
     extractive = "extractive"
     llm = "llm"
@@ -175,6 +180,10 @@ class AnswerResponse(BaseModel):
 
 class ManualRequest(BaseModel):
     mode: ManualMode = Field(ManualMode.llm, description="Motor de generacion")
+    quality_mode: ManualQualityMode = Field(
+        ManualQualityMode.fast,
+        description="Perfil de generacion: rapido o calidad",
+    )
     format: str = Field("markdown", description="Formato base de salida")
     provider: Optional[str] = Field(None, description="Proveedor local del LLM")
     model: Optional[str] = Field(None, description="Modelo local para modo llm")
@@ -186,6 +195,7 @@ class ManualMetadata(BaseModel):
     id: str
     video_id: str
     mode: ManualMode
+    quality_mode: ManualQualityMode = ManualQualityMode.fast
     status: ManualStatus
     format: str = "markdown"
     provider: Optional[str] = None
@@ -231,6 +241,7 @@ class FfmpegStatus(BaseModel):
 
 class SystemDependenciesResponse(BaseModel):
     ffmpeg: FfmpegStatus
+    inference_device: str
     whisper_model: str
     whisper_device: str
     whisper_compute_type: str
