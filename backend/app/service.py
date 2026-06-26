@@ -714,7 +714,7 @@ class VideoService:
         question: str,
         top_k: int,
         min_score: float,
-        mode: AnswerMode = AnswerMode.llm,
+        mode: AnswerMode = AnswerMode.extractive,
         provider: str | None = None,
         model: str | None = None,
     ) -> AnswerResponse:

@@ -37,7 +37,7 @@ export const askVideo = (id, question) =>
       question: question.trim(),
       top_k: 5,
       min_score: 0,
-      mode: "llm",
+      mode: "extractive",
     }),
   });
 

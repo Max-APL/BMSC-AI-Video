@@ -161,7 +161,7 @@ class AnswerRequest(BaseModel):
     question: str = Field(..., min_length=1, description="Pregunta del usuario")
     top_k: int = Field(3, ge=1, le=10)
     min_score: float = Field(0.0, ge=0.0, le=1.0)
-    mode: AnswerMode = Field(AnswerMode.llm, description="Motor de respuesta")
+    mode: AnswerMode = Field(AnswerMode.extractive, description="Motor de respuesta")
     provider: Optional[str] = Field(None, description="Proveedor local del LLM")
     model: Optional[str] = Field(None, description="Modelo local para modo llm")
 

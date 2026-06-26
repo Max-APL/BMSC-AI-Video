@@ -27,10 +27,10 @@ def make_match() -> SearchMatch:
     )
 
 
-def test_answer_request_defaults_to_llm_mode():
+def test_answer_request_defaults_to_extractive_mode():
     request = AnswerRequest(question="Donde descargo la app?")
 
-    assert request.mode == AnswerMode.llm
+    assert request.mode == AnswerMode.extractive
 
 
 def test_build_llm_answer_uses_retrieved_sources():
