@@ -15,10 +15,16 @@ class DBUser(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     role_id = Column(String, ForeignKey("roles.id"), nullable=False)
     created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=True)
+    is_disabled = Column(Boolean, nullable=False, default=False)
+    disabled_at = Column(String, nullable=True)
+    disabled_reason = Column(String, nullable=True)
+    failed_login_attempts = Column(Integer, nullable=False, default=0)
 
 class DBArea(Base):
     __tablename__ = "areas"

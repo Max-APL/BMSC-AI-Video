@@ -144,15 +144,17 @@ export function ManualsPanel({
                   <Download size={15} />
                   PDF
                 </button>
-                <button
-                  className="secondary-button compact"
-                  type="button"
-                  onClick={() => onDeleteRequest(manual)}
-                  disabled={loading}
-                >
-                  <Trash2 size={15} />
-                  Eliminar
-                </button>
+                {hasGeneratePermission && (
+                  <button
+                    className="secondary-button compact"
+                    type="button"
+                    onClick={() => onDeleteRequest(manual)}
+                    disabled={loading}
+                  >
+                    <Trash2 size={15} />
+                    Eliminar
+                  </button>
+                )}
               </div>
 
               {GENERATING_STATUSES.has(manual.status) && (

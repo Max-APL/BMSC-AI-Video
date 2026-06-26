@@ -6,7 +6,7 @@ import uuid
 import datetime
 
 from ..auth import get_db, get_current_user, require_permission
-from ..db_models import DBArea, DBSubArea, DBUser, DBVideoMetadata
+from ..db_models import DBArea, DBRole, DBSubArea, DBUser, DBVideoMetadata
 
 router = APIRouter(prefix="/areas", tags=["areas"])
 
@@ -77,7 +77,7 @@ def create_subarea(area_id: str, subarea: SubAreaCreate, db: Session = Depends(g
     return {"id": new_id, "name": subarea.name, "area_id": area_id}
 
 @router.put("/videos/{video_id}/subarea")
-def assign_video_subarea(video_id: str, subarea_id: Optional[str] = None, db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+def assign_video_subarea(video_id: str, subarea_id: Optional[str] = None, db: Session = Depends(get_db), current_user: DBUser = Depends(require_permission("upload_video"))):
     video = db.query(DBVideoMetadata).filter(DBVideoMetadata.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="Video no encontrado")
@@ -86,6 +86,14 @@ def assign_video_subarea(video_id: str, subarea_id: Optional[str] = None, db: Se
         subarea = db.query(DBSubArea).filter(DBSubArea.id == subarea_id).first()
         if not subarea:
             raise HTTPException(status_code=404, detail="Subárea no encontrada")
+        import json
+        role = db.query(DBRole).filter(DBRole.id == current_user.role_id).first()
+        allowed_areas = json.loads(role.allowed_areas) if role and role.allowed_areas else []
+        if "*" not in allowed_areas and subarea.area_id not in allowed_areas:
+            raise HTTPException(
+                status_code=403,
+                detail="No tienes permiso para asignar videos a esta área",
+            )
             
     video.subarea_id = subarea_id
     db.commit()

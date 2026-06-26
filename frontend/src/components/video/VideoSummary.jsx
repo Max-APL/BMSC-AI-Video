@@ -76,24 +76,28 @@ export function VideoSummary({
       </div>
 
       <div className="summary-actions">
-        <button
-          className="secondary-button"
-          type="button"
-          onClick={onReprocess}
-          disabled={loading}
-        >
-          <RefreshCcw size={16} />
-          Reprocesar
-        </button>
-        <button
-          className="danger-button"
-          type="button"
-          onClick={onDeleteRequest}
-          disabled={loading}
-        >
-          <Trash2 size={16} />
-          Eliminar
-        </button>
+        {onReprocess && (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={onReprocess}
+            disabled={loading}
+          >
+            <RefreshCcw size={16} />
+            Reprocesar
+          </button>
+        )}
+        {onDeleteRequest && (
+          <button
+            className="danger-button"
+            type="button"
+            onClick={onDeleteRequest}
+            disabled={loading}
+          >
+            <Trash2 size={16} />
+            Eliminar
+          </button>
+        )}
       </div>
     </section>
   );

@@ -8,3 +8,15 @@ export const createUser = (payload) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+
+export const updateUser = (id, payload) =>
+  apiRequest(`/users/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+export const deleteUser = (id) =>
+  apiRequest(`/users/${id}`, {
+    method: "DELETE",
+  });

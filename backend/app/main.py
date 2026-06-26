@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from typing import List
 
+from sqlalchemy import text
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Response, UploadFile, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -28,10 +30,10 @@ from .screenshots import ScreenshotError
 from .service import VideoService
 from .storage import VideoStorage
 from .transcription import FasterWhisperTranscriber
-from .database import Base, engine
+from .database import Base, SessionLocal, engine
 
 from .auth import get_current_user, require_permission
-from .db_models import DBUser
+from .db_models import DBRole, DBSubArea, DBUser, DBVideoMetadata
 from .routers import auth, areas, users, roles
 
 app = FastAPI(
@@ -61,9 +63,93 @@ search_engine = TfidfSearchEngine()
 service = VideoService(settings, storage, transcriber, search_engine)
 
 
+def _migrate_user_columns() -> None:
+    columns = {
+        "name": "VARCHAR",
+        "updated_at": "VARCHAR",
+        "is_disabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "disabled_at": "VARCHAR",
+        "disabled_reason": "VARCHAR",
+        "failed_login_attempts": "INTEGER NOT NULL DEFAULT 0",
+    }
+    with engine.begin() as connection:
+        existing = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(users)")).fetchall()
+        }
+        for column_name, column_type in columns.items():
+            if column_name not in existing:
+                connection.execute(
+                    text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+                )
+
+
+def _user_allowed_areas(db, current_user: DBUser) -> list[str]:
+    role = db.query(DBRole).filter(DBRole.id == current_user.role_id).first()
+    if not role or not role.allowed_areas:
+        return []
+    return json.loads(role.allowed_areas)
+
+
+def _ensure_video_access(video_id: str, current_user: DBUser) -> None:
+    db = SessionLocal()
+    try:
+        video = db.query(DBVideoMetadata).filter(DBVideoMetadata.id == video_id).first()
+        if not video:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Video no encontrado",
+            )
+
+        allowed_areas = _user_allowed_areas(db, current_user)
+        if "*" in allowed_areas:
+            return
+
+        if not video.subarea_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes acceso a este video",
+            )
+
+        subarea = db.query(DBSubArea).filter(DBSubArea.id == video.subarea_id).first()
+        if not subarea or subarea.area_id not in allowed_areas:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes acceso a este video",
+            )
+    finally:
+        db.close()
+
+
+def _ensure_subarea_access(subarea_id: str | None, current_user: DBUser) -> None:
+    if not subarea_id:
+        return
+
+    db = SessionLocal()
+    try:
+        subarea = db.query(DBSubArea).filter(DBSubArea.id == subarea_id).first()
+        if not subarea:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Subárea no encontrada",
+            )
+
+        allowed_areas = _user_allowed_areas(db, current_user)
+        if "*" in allowed_areas or subarea.area_id in allowed_areas:
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permiso para asignar videos a esta área",
+        )
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def recover_interrupted_processing() -> None:
     Base.metadata.create_all(bind=engine)
+    _migrate_user_columns()
     
     # Create default roles and admin user if not exists
     from sqlalchemy.orm import Session
@@ -76,22 +162,29 @@ def recover_interrupted_processing() -> None:
     
     db = SessionLocal()
     try:
+        super_admin_permissions = [
+            "view_dashboard", "view_videos", "view_library",
+            "view_organization", "view_users", "view_roles",
+            "upload_video", "generate_manual", "manage_organization",
+            "manage_users", "manage_roles", "edit_video",
+            "reprocess_video", "reindex_video", "delete_video",
+        ]
         # Check and create Super Admin role
         super_admin_role = db.query(DBRole).filter(DBRole.name == "Super Admin").first()
         if not super_admin_role:
             super_admin_role = DBRole(
                 id=str(uuid.uuid4()),
                 name="Super Admin",
-                permissions=json.dumps([
-                    "view_dashboard", "view_videos", "view_library", 
-                    "view_organization", "view_users", "view_roles",
-                    "upload_video", "generate_manual", "manage_organization",
-                    "manage_users", "manage_roles"
-                ]),
+                permissions=json.dumps(super_admin_permissions),
                 allowed_areas=json.dumps(["*"]),
                 created_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
             )
             db.add(super_admin_role)
+            db.commit()
+            db.refresh(super_admin_role)
+        else:
+            super_admin_role.permissions = json.dumps(super_admin_permissions)
+            super_admin_role.allowed_areas = json.dumps(["*"])
             db.commit()
             db.refresh(super_admin_role)
 
@@ -100,17 +193,28 @@ def recover_interrupted_processing() -> None:
             hashed_pw = get_password_hash("admin123")
             db.add(DBUser(
                 id=str(uuid.uuid4()),
+                name="Administrador del sistema",
                 email="admin@bmsc.com.bo",
                 hashed_password=hashed_pw,
                 role_id=super_admin_role.id,
-                created_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
+                created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                updated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                is_disabled=False,
+                failed_login_attempts=0,
             ))
             db.commit()
         else:
             # Migration for existing admin
             if not hasattr(admin_exists, 'role_id') or not admin_exists.role_id:
                  admin_exists.role_id = super_admin_role.id
-                 db.commit()
+            if not admin_exists.name:
+                 admin_exists.name = "Administrador del sistema"
+            admin_exists.is_disabled = False
+            admin_exists.failed_login_attempts = 0
+            admin_exists.disabled_at = None
+            admin_exists.disabled_reason = None
+            admin_exists.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            db.commit()
     finally:
         db.close()
 
@@ -191,6 +295,7 @@ def list_videos(current_user: DBUser = Depends(get_current_user)) -> List[VideoM
 
 @app.get("/videos/{video_id}", response_model=VideoMetadata)
 def get_video(video_id: str, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
+    _ensure_video_access(video_id, current_user)
     try:
         return service.get_video(video_id)
     except FileNotFoundError as exc:
@@ -198,10 +303,16 @@ def get_video(video_id: str, current_user: DBUser = Depends(get_current_user)) -
 
 
 @app.put("/videos/{video_id}", response_model=VideoMetadata)
-def update_video(video_id: str, request: VideoUpdate, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
+def update_video(
+    video_id: str,
+    request: VideoUpdate,
+    current_user: DBUser = Depends(require_permission("edit_video")),
+) -> VideoMetadata:
+    _ensure_video_access(video_id, current_user)
+    _ensure_subarea_access(request.subarea_id, current_user)
     from sqlalchemy.orm import Session
     from .database import SessionLocal
-    from .db_models import DBVideoMetadata
+    from .db_models import DBVideoMetadata, DBSubArea
     
     db = SessionLocal()
     try:
@@ -216,6 +327,9 @@ def update_video(video_id: str, request: VideoUpdate, current_user: DBUser = Dep
             if request.subarea_id == "":
                 db_video.subarea_id = None
             else:
+                subarea = db.query(DBSubArea).filter(DBSubArea.id == request.subarea_id).first()
+                if not subarea:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subárea no encontrada")
                 db_video.subarea_id = request.subarea_id
                 
         db.commit()
@@ -225,7 +339,12 @@ def update_video(video_id: str, request: VideoUpdate, current_user: DBUser = Dep
 
 
 @app.post("/videos/{video_id}/process", response_model=VideoMetadata)
-def reprocess_video(video_id: str, background_tasks: BackgroundTasks, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
+def reprocess_video(
+    video_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: DBUser = Depends(require_permission("reprocess_video")),
+) -> VideoMetadata:
+    _ensure_video_access(video_id, current_user)
     try:
         metadata = service.get_video(video_id)
     except FileNotFoundError as exc:
@@ -236,7 +355,11 @@ def reprocess_video(video_id: str, background_tasks: BackgroundTasks, current_us
 
 
 @app.post("/videos/{video_id}/index", response_model=VideoMetadata)
-def reindex_video(video_id: str, current_user: DBUser = Depends(get_current_user)) -> VideoMetadata:
+def reindex_video(
+    video_id: str,
+    current_user: DBUser = Depends(require_permission("reindex_video")),
+) -> VideoMetadata:
+    _ensure_video_access(video_id, current_user)
     try:
         return service.reindex_video(video_id)
     except FileNotFoundError as exc:
@@ -247,6 +370,7 @@ def reindex_video(video_id: str, current_user: DBUser = Depends(get_current_user
 
 @app.get("/videos/{video_id}/transcript", response_model=TranscriptResponse)
 def get_transcript(video_id: str, current_user: DBUser = Depends(get_current_user)) -> TranscriptResponse:
+    _ensure_video_access(video_id, current_user)
     try:
         return service.get_transcript(video_id)
     except FileNotFoundError as exc:
@@ -294,6 +418,7 @@ def create_manual(
     background_tasks: BackgroundTasks,
     current_user: DBUser = Depends(require_permission("generate_manual"))
 ) -> ManualMetadata:
+    _ensure_video_access(video_id, current_user)
     try:
         metadata = service.create_manual(video_id, request)
     except FileNotFoundError as exc:
@@ -309,6 +434,7 @@ def create_manual(
 
 @app.get("/videos/{video_id}/manuals", response_model=List[ManualMetadata])
 def list_manuals(video_id: str, current_user: DBUser = Depends(get_current_user)) -> List[ManualMetadata]:
+    _ensure_video_access(video_id, current_user)
     try:
         return service.list_manuals(video_id)
     except FileNotFoundError as exc:
@@ -317,6 +443,7 @@ def list_manuals(video_id: str, current_user: DBUser = Depends(get_current_user)
 
 @app.get("/videos/{video_id}/manuals/{manual_id}", response_model=ManualResponse)
 def get_manual(video_id: str, manual_id: str, include_content: bool = False, current_user: DBUser = Depends(get_current_user)) -> ManualResponse:
+    _ensure_video_access(video_id, current_user)
     try:
         return service.get_manual(video_id, manual_id, include_content=include_content)
     except FileNotFoundError as exc:
@@ -362,7 +489,12 @@ def get_manual_asset(video_id: str, manual_id: str, asset_path: str) -> FileResp
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-def delete_manual(video_id: str, manual_id: str, current_user: DBUser = Depends(get_current_user)) -> Response:
+def delete_manual(
+    video_id: str,
+    manual_id: str,
+    current_user: DBUser = Depends(require_permission("generate_manual")),
+) -> Response:
+    _ensure_video_access(video_id, current_user)
     try:
         service.delete_manual(video_id, manual_id)
     except FileNotFoundError as exc:
@@ -372,6 +504,7 @@ def delete_manual(video_id: str, manual_id: str, current_user: DBUser = Depends(
 
 @app.post("/videos/{video_id}/query", response_model=QueryResponse)
 def query_video(video_id: str, request: QueryRequest, current_user: DBUser = Depends(get_current_user)) -> QueryResponse:
+    _ensure_video_access(video_id, current_user)
     try:
         return service.query_video(
             video_id=video_id,
@@ -387,6 +520,7 @@ def query_video(video_id: str, request: QueryRequest, current_user: DBUser = Dep
 
 @app.post("/videos/{video_id}/ask", response_model=AnswerResponse)
 def ask_video(video_id: str, request: AnswerRequest, current_user: DBUser = Depends(get_current_user)) -> AnswerResponse:
+    _ensure_video_access(video_id, current_user)
     try:
         return service.answer_video(
             video_id=video_id,
@@ -408,7 +542,11 @@ def ask_video(video_id: str, request: AnswerRequest, current_user: DBUser = Depe
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-def delete_video(video_id: str, current_user: DBUser = Depends(get_current_user)) -> Response:
+def delete_video(
+    video_id: str,
+    current_user: DBUser = Depends(require_permission("delete_video")),
+) -> Response:
+    _ensure_video_access(video_id, current_user)
     try:
         service.delete_video(video_id)
     except FileNotFoundError as exc:

@@ -1,39 +1,71 @@
 import React, { useState } from "react";
-import { Users } from "lucide-react";
+import { Edit2, Plus, Trash2, UserCheck, UserX, Users } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { UserModal } from "@/components/modals/UserModal";
 import { useVideos } from "@/context/VideosContext";
+import { useAuth } from "@/context/AuthContext";
 import { useUsers } from "@/hooks/useUsers";
 import { useRoles } from "@/hooks/useRoles";
-import { createUser } from "@/services/users";
+import { createUser, deleteUser, updateUser } from "@/services/users";
 import "./UsersPage.css";
 
 export function UsersPage() {
-  const { loading, setLoading, setError } = useVideos();
+  const { setError } = useVideos();
+  const { currentUser, hasPermission } = useAuth();
   const { usersList, loadUsersList } = useUsers();
   const { roles } = useRoles();
+  const canManageUsers = hasPermission("manage_users");
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [roleId, setRoleId] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [modalError, setModalError] = useState("");
 
-  async function handleCreateUser(e) {
-    e.preventDefault();
-    if (!email.trim() || !password || !roleId) return;
-    setLoading(true);
+  function openCreate() {
+    setEditingUser(null);
+    setModalError("");
+    setModalOpen(true);
+  }
+
+  function openEdit(user) {
+    setEditingUser(user);
+    setModalError("");
+    setModalOpen(true);
+  }
+
+  async function handleSaveUser(payload) {
+    setActionLoading(true);
+    setModalError("");
     try {
-      await createUser({
-        email: email.trim(),
-        password,
-        role_id: roleId,
-      });
-      setEmail("");
-      setPassword("");
-      setRoleId("");
+      if (editingUser) {
+        await updateUser(editingUser.id, payload);
+      } else {
+        await createUser(payload);
+      }
+      setModalOpen(false);
+      setEditingUser(null);
+      await loadUsersList();
+    } catch (err) {
+      setModalError(err.message);
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleDeleteUser() {
+    if (!deleteTarget) return;
+    setActionLoading(true);
+    try {
+      await deleteUser(deleteTarget.id);
+      setDeleteTarget(null);
       await loadUsersList();
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   }
 
@@ -50,71 +82,108 @@ export function UsersPage() {
               capacitación inteligente.
             </p>
           </div>
+          {canManageUsers && (
+            <button type="button" className="primary-button" onClick={openCreate}>
+              <Plus size={18} />
+              Nuevo usuario
+            </button>
+          )}
         </div>
 
         <div className="org-grid">
-          {/* Create user form */}
-          <div className="area-card user-create-card">
-            <h3>Crear Nuevo Usuario</h3>
-            <form
-              className="add-form user-form"
-              onSubmit={handleCreateUser}
-            >
-              <input
-                type="email"
-                placeholder="Correo corporativo (@bmsc.com.bo)"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={loading}
-                required
-              />
-              <input
-                type="password"
-                placeholder="Contraseña temporal"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading}
-                required
-              />
-              <select
-                value={roleId}
-                onChange={(e) => setRoleId(e.target.value)}
-                disabled={loading}
-                className="user-role-select"
-                required
-              >
-                <option value="">Seleccionar rol...</option>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="primary-button compact"
-                type="submit"
-                disabled={loading || !email.trim() || !password || !roleId}
-              >
-                Crear Usuario
-              </button>
-            </form>
-          </div>
+          {!canManageUsers && (
+            <div className="area-card user-readonly-card">
+              <h3>Modo consulta</h3>
+              <p>
+                Tu rol permite revisar usuarios, pero no crear ni modificar accesos.
+              </p>
+            </div>
+          )}
 
-          {/* User cards */}
           {usersList.map((u) => (
-            <div className="area-card" key={u.id}>
+            <div className="area-card user-management-card" key={u.id}>
               <div className="user-card-header">
-                <Users size={20} color="var(--green-800)" />
-                <h3 className="user-card-email">{u.email}</h3>
+                <div className={u.is_disabled ? "user-avatar-card disabled" : "user-avatar-card"}>
+                  {u.is_disabled ? <UserX size={18} /> : <UserCheck size={18} />}
+                </div>
+                <div>
+                  <h3 className="user-card-name">{u.name || u.email}</h3>
+                  <p className="user-card-email">{u.email}</p>
+                </div>
               </div>
-              <div className="user-card-role">
+
+              <div className="user-card-badges">
                 <span className="user-role-badge">
                   Rol: {u.role?.name || "Sin Rol"}
                 </span>
+                <span className={u.is_disabled ? "user-status-badge disabled" : "user-status-badge enabled"}>
+                  {u.is_disabled ? "Deshabilitado" : "Habilitado"}
+                </span>
               </div>
+
+              {(u.role?.name !== "Super Admin" || u.disabled_reason) && (
+                <div className="user-card-meta">
+                  {u.role?.name !== "Super Admin" && (
+                    <span>Intentos fallidos: {u.failed_login_attempts || 0}</span>
+                  )}
+                  {u.disabled_reason && <span>{u.disabled_reason}</span>}
+                </div>
+              )}
+
+              {canManageUsers && (
+                <div className="user-card-actions">
+                  <button
+                    type="button"
+                    className="secondary-button compact"
+                    onClick={() => openEdit(u)}
+                  >
+                    <Edit2 size={14} />
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button compact"
+                    onClick={() => setDeleteTarget(u)}
+                    disabled={u.id === currentUser?.id}
+                    title={u.id === currentUser?.id ? "No puedes eliminar tu propio usuario" : "Eliminar usuario"}
+                  >
+                    <Trash2 size={14} />
+                    Eliminar
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
+
+        <UserModal
+          isOpen={modalOpen}
+          editingUser={editingUser}
+          roles={roles}
+          currentUser={currentUser}
+          loading={actionLoading}
+          error={modalError}
+          onClose={() => {
+            if (!actionLoading) setModalOpen(false);
+          }}
+          onSave={handleSaveUser}
+        />
+
+        <ConfirmDialog
+          isOpen={Boolean(deleteTarget)}
+          title="Eliminar usuario"
+          body={
+            deleteTarget
+              ? `Se eliminará definitivamente el usuario ${deleteTarget.email}. Esta acción libera el correo para una futura creación.`
+              : ""
+          }
+          confirmLabel="Eliminar usuario"
+          loading={actionLoading}
+          onClose={() => {
+            if (!actionLoading) setDeleteTarget(null);
+          }}
+          onConfirm={handleDeleteUser}
+        />
       </section>
     </>
   );

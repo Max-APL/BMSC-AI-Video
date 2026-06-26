@@ -1,7 +1,6 @@
 import React from "react";
 import { useLocation, useParams } from "react-router-dom";
-import { Database, ShieldCheck } from "lucide-react";
-import { API_BASE_URL } from "@/config/env";
+import { ShieldCheck } from "lucide-react";
 import { useVideos } from "@/context/VideosContext";
 import "./Topbar.css";
 
@@ -69,10 +68,6 @@ export function Topbar({ actions }) {
         <div className="bank-chip">
           <ShieldCheck size={15} />
           Entorno institucional
-        </div>
-        <div className="api-chip">
-          <Database size={15} />
-          {API_BASE_URL.replace(/^https?:\/\//, "")}
         </div>
         {actions}
       </div>

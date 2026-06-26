@@ -192,11 +192,11 @@ export function Sidebar() {
       <div className="user-profile">
         <div className="user-profile-row">
           <div className="user-avatar">
-            {currentUser?.email?.charAt(0).toUpperCase() || "U"}
+            {(currentUser?.name || currentUser?.email)?.charAt(0).toUpperCase() || "U"}
           </div>
           <div className="user-info">
             <div className="user-email" title={currentUser?.email}>
-              {currentUser?.email}
+              {currentUser?.name || currentUser?.email}
             </div>
             <div className="user-role">{currentUser?.role}</div>
           </div>

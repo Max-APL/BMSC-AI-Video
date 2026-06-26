@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Clock3, FileText, FolderOpen, PlayCircle, Search } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
@@ -13,22 +13,96 @@ import { thumbnailUrl } from "@/services/videos";
 import { cx } from "@/utils/cx";
 import "./LibraryPage.css";
 
+const UNASSIGNED_NAV_ID = "__unassigned__";
+
 export function LibraryPage() {
   const navigate = useNavigate();
   const { videos } = useVideos();
   const { areas } = useAreas();
 
-  const [filterArea, setFilterArea] = useState(null);
-  const [filterSubarea, setFilterSubarea] = useState(null);
+  const [selectedAreaId, setSelectedAreaId] = useState(null);
+  const [selectedSubareaId, setSelectedSubareaId] = useState(null);
   const [search, setSearch] = useState("");
 
-  const scopedVideos = videos.filter((v) => {
-    if (filterSubarea) return v.subarea_id === filterSubarea.id;
-    if (filterArea) {
-      const subIds = filterArea.subareas.map((s) => s.id);
-      return subIds.includes(v.subarea_id);
+  const libraryIndex = useMemo(() => {
+    const subareaToArea = new Map();
+    const areaVideoCounts = new Map(areas.map((area) => [area.id, 0]));
+    const subareaVideoCounts = new Map();
+    let unassignedCount = 0;
+
+    areas.forEach((area) => {
+      area.subareas.forEach((subarea) => {
+        subareaToArea.set(subarea.id, area.id);
+        subareaVideoCounts.set(subarea.id, 0);
+      });
+    });
+
+    videos.forEach((video) => {
+      if (!video.subarea_id) {
+        unassignedCount += 1;
+        return;
+      }
+
+      const areaId = subareaToArea.get(video.subarea_id);
+      if (!areaId) return;
+
+      areaVideoCounts.set(areaId, (areaVideoCounts.get(areaId) || 0) + 1);
+      subareaVideoCounts.set(
+        video.subarea_id,
+        (subareaVideoCounts.get(video.subarea_id) || 0) + 1
+      );
+    });
+
+    return {
+      areaVideoCounts,
+      subareaVideoCounts,
+      unassignedCount,
+    };
+  }, [areas, videos]);
+
+  const hasUnassignedVideos = libraryIndex.unassignedCount > 0;
+  const selectedArea = areas.find((area) => area.id === selectedAreaId) || null;
+  const selectedSubarea =
+    selectedArea?.subareas.find((subarea) => subarea.id === selectedSubareaId) ||
+    null;
+  const isUnassignedSelected = selectedAreaId === UNASSIGNED_NAV_ID;
+
+  useEffect(() => {
+    if (selectedAreaId === UNASSIGNED_NAV_ID && hasUnassignedVideos) return;
+    if (selectedAreaId && areas.some((area) => area.id === selectedAreaId)) return;
+
+    if (areas.length > 0) {
+      setSelectedAreaId(areas[0].id);
+      setSelectedSubareaId(null);
+      return;
     }
-    return true;
+
+    if (hasUnassignedVideos) {
+      setSelectedAreaId(UNASSIGNED_NAV_ID);
+      setSelectedSubareaId(null);
+      return;
+    }
+
+    setSelectedAreaId(null);
+    setSelectedSubareaId(null);
+  }, [areas, hasUnassignedVideos, selectedAreaId]);
+
+  useEffect(() => {
+    if (!selectedArea || !selectedSubareaId) return;
+    const stillExists = selectedArea.subareas.some(
+      (subarea) => subarea.id === selectedSubareaId
+    );
+    if (!stillExists) setSelectedSubareaId(null);
+  }, [selectedArea, selectedSubareaId]);
+
+  const scopedVideos = videos.filter((video) => {
+    if (isUnassignedSelected) return !video.subarea_id;
+    if (selectedSubarea) return video.subarea_id === selectedSubarea.id;
+    if (selectedArea) {
+      const subareaIds = selectedArea.subareas.map((subarea) => subarea.id);
+      return subareaIds.includes(video.subarea_id);
+    }
+    return false;
   });
   const searchTerm = search.trim().toLowerCase();
   const filteredVideos = scopedVideos.filter(
@@ -51,87 +125,117 @@ export function LibraryPage() {
     <>
       <Topbar />
       <section className="library-surface library-layout">
-        {/* Sidebar filters */}
-        <div className="library-filter-nav">
-          <div className="library-header library-filter-header">
+        <aside className="library-area-nav" aria-label="Áreas disponibles">
+          <div className="library-header library-area-header">
             <div>
               <span className="eyebrow">Navegación</span>
-              <h2>Filtros</h2>
+              <h2>Áreas disponibles</h2>
+              <p>Selecciona un área para revisar sus capacitaciones.</p>
             </div>
           </div>
 
-          <div className="library-filter-list">
-            <div
-              className={cx("area-card library-filter-card", !filterArea && "filter-active")}
-              onClick={() => {
-                setFilterArea(null);
-                setFilterSubarea(null);
-              }}
-            >
-              <h3>Todos los videos</h3>
-            </div>
-
+          <div className="library-area-list">
             {areas.map((area) => (
-              <div
+              <article
                 key={area.id}
                 className={cx(
-                  "area-card library-filter-card",
-                  filterArea?.id === area.id && "filter-active"
+                  "library-area-card",
+                  selectedAreaId === area.id && "area-active"
                 )}
-                onClick={() => {
-                  setFilterArea(area);
-                  setFilterSubarea(null);
-                }}
               >
-                <h3>
-                  {area.name} <span>({area.subareas.length})</span>
-                </h3>
-                <div className="subarea-list">
+                <button
+                  type="button"
+                  className="library-area-button"
+                  onClick={() => {
+                    setSelectedAreaId(area.id);
+                    setSelectedSubareaId(null);
+                    setSearch("");
+                  }}
+                >
+                  <h3>
+                    {area.name}
+                    <span>{libraryIndex.areaVideoCounts.get(area.id) || 0}</span>
+                  </h3>
+                </button>
+                <div className="library-subarea-list">
                   {area.subareas.map((sub) => (
-                    <div
+                    <button
+                      type="button"
                       key={sub.id}
                       className={cx(
-                        "subarea-item",
-                        filterSubarea?.id === sub.id && "subarea-active"
+                        "library-subarea-item",
+                        selectedSubareaId === sub.id && "subarea-active"
                       )}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setFilterArea(area);
-                        setFilterSubarea(sub);
+                        setSelectedAreaId(area.id);
+                        setSelectedSubareaId(sub.id);
+                        setSearch("");
                       }}
                     >
-                      {sub.name}
-                    </div>
+                      <span>{sub.name}</span>
+                      <strong>
+                        {libraryIndex.subareaVideoCounts.get(sub.id) || 0}
+                      </strong>
+                    </button>
                   ))}
                 </div>
-              </div>
+              </article>
             ))}
-          </div>
-        </div>
 
-        {/* Main content */}
+            {hasUnassignedVideos && (
+              <button
+                type="button"
+                className={cx(
+                  "library-area-card",
+                  isUnassignedSelected && "area-active"
+                )}
+                onClick={() => {
+                  setSelectedAreaId(UNASSIGNED_NAV_ID);
+                  setSelectedSubareaId(null);
+                  setSearch("");
+                }}
+              >
+                <h3>
+                  Pendientes de asignación
+                  <span>{libraryIndex.unassignedCount}</span>
+                </h3>
+              </button>
+            )}
+          </div>
+        </aside>
+
         <div className="library-main-content">
           <div className="library-header">
             <div>
               <span className="eyebrow">
-                {filterArea ? filterArea.name : "Gestión de archivos"}
+                {selectedArea?.name ||
+                  (isUnassignedSelected
+                    ? "Videos sin área"
+                    : "Biblioteca institucional")}
               </span>
               <h2>
-                {filterSubarea
-                  ? filterSubarea.name
-                  : filterArea
-                  ? "Todos los videos del área"
-                  : "Biblioteca de capacitaciones"}
+                {selectedSubarea?.name ||
+                  selectedArea?.name ||
+                  (isUnassignedSelected
+                    ? "Pendientes de asignación"
+                    : "Biblioteca de capacitaciones")}
               </h2>
               <p>
-                Administra los materiales disponibles para consulta, documentación y
-                revisión operativa.
+                Consulta los materiales disponibles del área seleccionada y abre el
+                expediente correspondiente para revisar video, transcripción y
+                documentación.
               </p>
             </div>
             <div className="library-mini-stats">
               <span>
-                <strong>{scopedVideos.length}</strong> Total
+                <strong>{scopedVideos.length}</strong> Videos
               </span>
+              {selectedArea && (
+                <span>
+                  <strong>{selectedArea.subareas.length}</strong> Subáreas
+                </span>
+              )}
               {searchTerm && (
                 <span>
                   <strong>{filteredVideos.length}</strong> Resultados
@@ -146,9 +250,9 @@ export function LibraryPage() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={
-                filterArea
-                  ? "Buscar video dentro del área..."
-                  : "Buscar video en la biblioteca..."
+                selectedSubarea
+                  ? "Buscar video dentro de esta subárea..."
+                  : "Buscar video dentro del área seleccionada..."
               }
             />
           </label>
@@ -161,7 +265,7 @@ export function LibraryPage() {
                 body={
                   searchTerm
                     ? "Prueba con otro nombre o limpia la búsqueda."
-                    : "No hay videos registrados en esta selección."
+                    : "No hay videos registrados para esta área."
                 }
               />
             )}

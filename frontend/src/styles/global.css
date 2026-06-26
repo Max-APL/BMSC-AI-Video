@@ -301,6 +301,35 @@ img {
   overflow-y: auto;
 }
 
+.sidebar .video-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(234, 214, 165, 0.72) rgba(255, 255, 255, 0.08);
+}
+
+.sidebar .video-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.sidebar .video-list::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar .video-list::-webkit-scrollbar-thumb {
+  min-height: 38px;
+  border: 2px solid rgba(0, 59, 41, 0.92);
+  border-radius: 999px;
+  background: rgba(234, 214, 165, 0.78);
+}
+
+.sidebar .video-list::-webkit-scrollbar-thumb:hover {
+  background: var(--gold-200);
+}
+
+.sidebar .video-list::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .video-item {
   display: grid;
   gap: 10px;

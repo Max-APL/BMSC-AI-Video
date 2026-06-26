@@ -35,6 +35,10 @@ export function VideoDetailPage() {
 
   const video = videos.find((v) => v.id === id) || null;
   const videoSrc = id ? mediaUrl(id) : "";
+  const canEditVideo = hasPermission("edit_video");
+  const canReprocessVideo = hasPermission("reprocess_video");
+  const canReindexVideo = hasPermission("reindex_video");
+  const canDeleteVideo = hasPermission("delete_video");
 
   const videoRef = useRef(null);
   const [activeTab, setActiveTab] = useState("assistant");
@@ -130,7 +134,7 @@ export function VideoDetailPage() {
   }
 
   async function handleReindex() {
-    if (!video) return;
+    if (!video || !canReindexVideo) return;
     setLoading(true);
     setError("");
     try {
@@ -144,7 +148,7 @@ export function VideoDetailPage() {
   }
 
   async function handleReprocess() {
-    if (!video) return;
+    if (!video || !canReprocessVideo) return;
     setLoading(true);
     setError("");
     try {
@@ -158,7 +162,7 @@ export function VideoDetailPage() {
   }
 
   async function handleSaveEdit() {
-    if (!editingVideo) return;
+    if (!editingVideo || !canEditVideo) return;
     setLoading(true);
     try {
       await updateVideo(editingVideo.id, {
@@ -175,7 +179,7 @@ export function VideoDetailPage() {
   }
 
   async function handleConfirmDelete() {
-    if (!videoToDelete) return;
+    if (!videoToDelete || !canDeleteVideo) return;
     setLoading(true);
     try {
       await deleteVideo(videoToDelete.id);
@@ -201,7 +205,7 @@ export function VideoDetailPage() {
       .find((subarea) => subarea.id === video?.subarea_id)?.label ||
     "Sin área asignada";
 
-  const reindexAction = (
+  const reindexAction = canReindexVideo ? (
     <button
       className="secondary-button"
       type="button"
@@ -211,7 +215,7 @@ export function VideoDetailPage() {
       <RefreshCcw size={16} />
       Reindexar
     </button>
-  );
+  ) : null;
 
   if (!video) {
     return (
@@ -349,8 +353,8 @@ export function VideoDetailPage() {
         areaLabel={areaLabel}
         manualsCount={manuals.length}
         latestManual={latestManual}
-        onReprocess={handleReprocess}
-        onDeleteRequest={() => setVideoToDelete(video)}
+        onReprocess={canReprocessVideo ? handleReprocess : undefined}
+        onDeleteRequest={canDeleteVideo ? () => setVideoToDelete(video) : undefined}
         loading={loading}
       />
 

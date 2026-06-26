@@ -54,6 +54,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(DBUser).filter(DBUser.id == user_id).first()
     if user is None:
         raise credentials_exception
+    if user.is_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario deshabilitado. Solicita la habilitación a un Super Admin.",
+        )
     return user
 
 def require_permission(permission: str):

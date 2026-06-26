@@ -18,11 +18,22 @@ class RoleUpdate(BaseModel):
     permissions: Optional[List[str]] = None
     allowed_areas: Optional[List[str]] = None
 
+
+class RoleAssignedUser(BaseModel):
+    id: str
+    name: Optional[str] = None
+    email: EmailStr
+    is_disabled: bool = False
+
+
 class RoleResponse(RoleBase):
     id: str
     created_at: str
+    user_count: int = 0
+    assigned_users: List[RoleAssignedUser] = Field(default_factory=list)
 
 class UserBase(BaseModel):
+    name: Optional[str] = None
     email: EmailStr
     role_id: str
 
@@ -30,13 +41,20 @@ class UserCreate(UserBase):
     password: str
 
 class UserUpdate(BaseModel):
+    name: Optional[str] = None
     email: Optional[EmailStr] = None
     role_id: Optional[str] = None
     password: Optional[str] = None
+    is_disabled: Optional[bool] = None
 
 class UserResponse(UserBase):
     id: str
     created_at: str
+    updated_at: Optional[str] = None
+    is_disabled: bool = False
+    disabled_at: Optional[str] = None
+    disabled_reason: Optional[str] = None
+    failed_login_attempts: int = 0
     role: Optional[RoleResponse] = None
 
 class LoginRequest(BaseModel):

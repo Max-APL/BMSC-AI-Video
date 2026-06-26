@@ -22,6 +22,9 @@ export function UploadPage() {
   const { videos, uploading, setUploading, error, setError, loading, setLoading, loadVideos } =
     useVideos();
   const { areas } = useAreas();
+  const canUploadVideo = hasPermission("upload_video");
+  const canEditVideo = hasPermission("edit_video");
+  const canDeleteVideo = hasPermission("delete_video");
 
   const [uploadSubareaId, setUploadSubareaId] = useState("");
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -80,7 +83,7 @@ export function UploadPage() {
   }
 
   async function handleSaveEdit() {
-    if (!editingVideo) return;
+    if (!editingVideo || !canEditVideo) return;
     setLoading(true);
     try {
       await updateVideo(editingVideo.id, {
@@ -97,7 +100,7 @@ export function UploadPage() {
   }
 
   async function handleConfirmDelete() {
-    if (!videoToDelete) return;
+    if (!videoToDelete || !canDeleteVideo) return;
     setLoading(true);
     try {
       await deleteVideo(videoToDelete.id);
@@ -114,7 +117,7 @@ export function UploadPage() {
     <>
       <Topbar />
       <section className="upload-page">
-        {hasPermission("upload_video") ? (
+        {canUploadVideo ? (
           <>
             <div className="upload-hero">
               <div>
@@ -192,24 +195,28 @@ export function UploadPage() {
                   </div>
                   <StatusPill status={video.status} stage={video.processing_stage} />
                   <div className="history-row-actions">
-                    <button
-                      className="secondary-button compact"
-                      type="button"
-                      onClick={() => {
-                        setEditingVideo(video);
-                        setEditFilename(video.original_filename);
-                        setEditSubarea(video.subarea_id || "");
-                      }}
-                    >
-                      <Edit2 size={15} /> Editar
-                    </button>
-                    <button
-                      className="danger-button compact"
-                      type="button"
-                      onClick={() => setVideoToDelete(video)}
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                    {canEditVideo && (
+                      <button
+                        className="secondary-button compact"
+                        type="button"
+                        onClick={() => {
+                          setEditingVideo(video);
+                          setEditFilename(video.original_filename);
+                          setEditSubarea(video.subarea_id || "");
+                        }}
+                      >
+                        <Edit2 size={15} /> Editar
+                      </button>
+                    )}
+                    {canDeleteVideo && (
+                      <button
+                        className="danger-button compact"
+                        type="button"
+                        onClick={() => setVideoToDelete(video)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
                     <button
                       className="secondary-button compact"
                       type="button"

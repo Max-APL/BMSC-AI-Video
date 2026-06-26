@@ -1,6 +1,6 @@
 .roles-top-bar {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   margin-bottom: 24px;
 }
@@ -26,6 +26,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   border-bottom: 1px solid var(--line);
   padding-bottom: 12px;
 }
@@ -58,10 +59,26 @@
   background: var(--gold-600);
 }
 
-.role-edit-btn {
+.role-access-badge.system {
+  color: var(--green-950);
+  background: var(--gold-200);
+}
+
+.role-card-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.role-edit-btn,
+.role-delete-btn {
   width: 28px;
   height: 28px;
-  margin-left: auto;
+}
+
+.role-delete-btn {
+  color: var(--danger);
+  background: #fff1f1;
 }
 
 .role-section-micro-label {
@@ -94,4 +111,13 @@
   margin-top: auto;
   padding-top: 12px;
   border-top: 1px dashed var(--line);
+}
+
+.role-users-footnote {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
 }
