@@ -13,6 +13,7 @@ from .manual_generation import (
     get_llm_client,
     normalize_basic_markdown,
 )
+from .manual_agents import run_agentic_manual_review
 from .manual_review import ManualReviewReport, review_manual_content
 from .models import ManualQualityMode, TranscriptSegment, VideoMetadata
 
@@ -101,6 +102,38 @@ def build_quality_llm_manual(
     )
     if write_artifact:
         write_artifact("review_report.json", review.to_dict())
+
+    try:
+        agentic_review = run_agentic_manual_review(
+            result.content,
+            metadata=metadata,
+            segments=segments,
+            screenshots_by_block=screenshots_by_block,
+            heuristic_review=review,
+            client=get_llm_client(provider=provider, model=model, settings=settings),
+            max_tokens=max(settings.llm_max_tokens_section, 1600),
+        )
+        if write_artifact:
+            write_artifact("agent_fidelity_report.json", agentic_review.fidelity_report.to_dict())
+            write_artifact("agent_visual_report.json", agentic_review.visual_report.to_dict())
+            write_artifact("agent_editor_report.json", agentic_review.editor_report.to_dict())
+            write_artifact("agentic_review_summary.json", agentic_review.summary_dict())
+        if agentic_review.repaired:
+            result = ManualBuildResult(
+                content=agentic_review.content,
+                section_count=result.section_count,
+                word_count=count_words(agentic_review.content),
+            )
+            review = review_manual_content(
+                result.content,
+                section_count=result.section_count,
+                word_count=result.word_count,
+                screenshot_count=sum(len(items) for items in screenshots_by_block.values()),
+            )
+            if write_artifact:
+                write_artifact("review_report_agentic.json", review.to_dict())
+    except Exception as exc:
+        log_event(f"Revision agentica del manual fallo; se conserva version previa: {exc}", metadata.id)
 
     max_loops = max(0, min(2, settings.manual_quality_max_loops))
     if review.score >= settings.manual_min_review_score or max_loops <= 0:
