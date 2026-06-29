@@ -7,6 +7,7 @@ import datetime
 import json
 
 from ..auth import create_temporary_password, get_db, get_current_user, get_password_hash
+from ..config import settings
 from ..db_models import DBUser, DBRole
 from ..emails.messages import build_account_created_email, build_password_reset_email
 from ..emails.smtp import EmailDeliveryError, send_email
@@ -43,6 +44,10 @@ def now_iso() -> str:
 def is_super_admin(db: Session, user: DBUser) -> bool:
     role = db.query(DBRole).filter(DBRole.id == user.role_id).first()
     return bool(role and role.name == "Super Admin")
+
+
+def _is_allowed_user_email(email: str) -> bool:
+    return settings.allow_non_bmsc_emails or email.endswith("@bmsc.com.bo")
 
 
 def role_response(role: DBRole | None, db: Session) -> RoleResponse | None:
@@ -91,7 +96,7 @@ def get_users(db: Session = Depends(get_db), current_user: DBUser = Depends(get_
 def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
     check_admin(current_user, db)
     email = str(user.email).strip().lower()
-    if not email.endswith("@bmsc.com.bo"):
+    if not _is_allowed_user_email(email):
         raise HTTPException(status_code=400, detail="El correo debe ser @bmsc.com.bo")
     
     existing = db.query(DBUser).filter(func.lower(DBUser.email) == email).first()
@@ -157,7 +162,7 @@ def update_user(user_id: str, user: UserUpdate, db: Session = Depends(get_db), c
 
     if user.email:
         email = str(user.email).strip().lower()
-        if not email.endswith("@bmsc.com.bo"):
+        if not _is_allowed_user_email(email):
             raise HTTPException(status_code=400, detail="El correo debe ser @bmsc.com.bo")
         existing = db.query(DBUser).filter(
             func.lower(DBUser.email) == email,

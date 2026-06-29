@@ -191,6 +191,7 @@ class Settings:
     auth_lockout_minutes: int = _env_int("AUTH_LOCKOUT_MINUTES", 15)
     auth_code_expire_minutes: int = _env_int("AUTH_CODE_EXPIRE_MINUTES", 15)
     auth_code_max_attempts: int = _env_int("AUTH_CODE_MAX_ATTEMPTS", 5)
+    allow_non_bmsc_emails: bool = _env_bool("ALLOW_NON_BMSC_EMAILS", False)
 
     inference_device: str = _effective_inference_device()
     whisper_model: str = os.getenv("WHISPER_MODEL", "base")

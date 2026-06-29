@@ -26,10 +26,6 @@ export function LoginPage() {
 
   const validateEmail = () => {
     setError("");
-    if (!email.endsWith("@bmsc.com.bo")) {
-      setError("Solo se permiten correos corporativos @bmsc.com.bo");
-      return false;
-    }
     return true;
   };
 
