@@ -26,7 +26,12 @@ export async function apiRequest(path, options = {}) {
 
   if (!response.ok) {
     const detail = payload?.detail || `Error ${response.status}`;
-    throw new Error(detail);
+    const message =
+      typeof detail === "string" ? detail : detail?.message || `Error ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
   }
   return payload;
 }

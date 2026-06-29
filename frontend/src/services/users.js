@@ -20,3 +20,13 @@ export const deleteUser = (id) =>
   apiRequest(`/users/${id}`, {
     method: "DELETE",
   });
+
+export const resetUserPassword = (userId) =>
+  apiRequest(`/users/${userId}/reset-password`, {
+    method: "POST",
+  });
+
+export const unlockUser = (userId) =>
+  apiRequest(`/users/${userId}/unlock`, {
+    method: "POST",
+  });

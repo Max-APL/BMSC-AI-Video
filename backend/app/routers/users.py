@@ -6,8 +6,10 @@ import uuid
 import datetime
 import json
 
-from ..auth import get_db, get_current_user, get_password_hash
+from ..auth import create_temporary_password, get_db, get_current_user, get_password_hash
 from ..db_models import DBUser, DBRole
+from ..emails.messages import build_account_created_email, build_password_reset_email
+from ..emails.smtp import EmailDeliveryError, send_email
 from ..models import UserCreate, UserUpdate, UserResponse, RoleResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -69,9 +71,10 @@ def user_response(user: DBUser, db: Session) -> UserResponse:
         disabled_at=user.disabled_at,
         disabled_reason=user.disabled_reason,
         failed_login_attempts=user.failed_login_attempts or 0,
+        locked_until=user.locked_until,
+        force_password_change=bool(user.force_password_change),
         role=role_response(role, db),
     )
-
 
 @router.get("", response_model=List[UserResponse])
 def get_users(db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
@@ -99,7 +102,8 @@ def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: D
     if not role:
         raise HTTPException(status_code=400, detail="El rol especificado no existe")
 
-    hashed_password = get_password_hash(user.password)
+    temporary_password = user.password or create_temporary_password()
+    hashed_password = get_password_hash(temporary_password)
     user_id = str(uuid.uuid4())
     now = now_iso()
     name = user.name.strip() if user.name and user.name.strip() else email.split("@")[0]
@@ -114,8 +118,25 @@ def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: D
         updated_at=now,
         is_disabled=False,
         failed_login_attempts=0,
+        locked_until=None,
+        force_password_change=True,
+        password_changed_at=None,
+        token_version=0,
     )
     db.add(db_user)
+    try:
+        send_email(
+            db_user.email,
+            build_account_created_email(
+                to_addr=db_user.email,
+                username=db_user.email,
+                temporary_password=temporary_password,
+                role_name=role.name,
+            ),
+        )
+    except EmailDeliveryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     db.commit()
     db.refresh(db_user)
     
@@ -160,6 +181,10 @@ def update_user(user_id: str, user: UserUpdate, db: Session = Depends(get_db), c
     if user.password:
         db_user.hashed_password = get_password_hash(user.password)
         db_user.failed_login_attempts = 0
+        db_user.locked_until = None
+        db_user.force_password_change = True
+        db_user.password_changed_at = None
+        db_user.token_version = int(db_user.token_version or 0) + 1
 
     if user.is_disabled is not None:
         if db_user.id == current_user.id and user.is_disabled:
@@ -183,7 +208,55 @@ def update_user(user_id: str, user: UserUpdate, db: Session = Depends(get_db), c
             db_user.disabled_at = None
             db_user.disabled_reason = None
             db_user.failed_login_attempts = 0
+            db_user.locked_until = None
 
+    db_user.updated_at = now_iso()
+    db.commit()
+    db.refresh(db_user)
+    return user_response(db_user, db)
+
+
+@router.post("/{user_id}/reset-password", response_model=UserResponse)
+def reset_user_password(user_id: str, db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    check_admin(current_user, db)
+    db_user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    temporary_password = create_temporary_password()
+    db_user.hashed_password = get_password_hash(temporary_password)
+    db_user.force_password_change = True
+    db_user.password_changed_at = None
+    db_user.failed_login_attempts = 0
+    db_user.locked_until = None
+    db_user.token_version = int(db_user.token_version or 0) + 1
+    db_user.updated_at = now_iso()
+    try:
+        send_email(
+            db_user.email,
+            build_password_reset_email(
+                to_addr=db_user.email,
+                username=db_user.email,
+                reset_by=current_user.email,
+                temporary_password=temporary_password,
+            ),
+        )
+    except EmailDeliveryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(db_user)
+    return user_response(db_user, db)
+
+
+@router.post("/{user_id}/unlock", response_model=UserResponse)
+def unlock_user(user_id: str, db: Session = Depends(get_db), current_user: DBUser = Depends(get_current_user)):
+    check_admin(current_user, db)
+    db_user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    db_user.failed_login_attempts = 0
+    db_user.locked_until = None
     db_user.updated_at = now_iso()
     db.commit()
     db.refresh(db_user)

@@ -203,6 +203,10 @@ def recover_interrupted_processing() -> None:
                 updated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 is_disabled=False,
                 failed_login_attempts=0,
+                locked_until=None,
+                force_password_change=False,
+                password_changed_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                token_version=0,
             ))
             db.commit()
         else:
@@ -215,6 +219,12 @@ def recover_interrupted_processing() -> None:
             admin_exists.failed_login_attempts = 0
             admin_exists.disabled_at = None
             admin_exists.disabled_reason = None
+            admin_exists.locked_until = None
+            admin_exists.force_password_change = False
+            if admin_exists.password_changed_at is None:
+                 admin_exists.password_changed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            if admin_exists.token_version is None:
+                 admin_exists.token_version = 0
             admin_exists.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
             db.commit()
     finally:

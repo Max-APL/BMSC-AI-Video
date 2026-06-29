@@ -1,0 +1,9 @@
+Hola $username,
+
+Tu cuenta en $brand_name fue creada.
+Correo de acceso: $to_addr
+Contraseña temporal: $temporary_password
+$role_plain
+Esta contraseña es temporal. Al iniciar sesión, $brand_name te pedirá cambiarla y enviará un código de verificación a tu correo.
+
+Este mensaje fue generado automáticamente por $brand_name. No respondas a este correo.

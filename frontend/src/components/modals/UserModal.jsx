@@ -120,9 +120,8 @@ export function UserModal({
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder={isEditing ? "Dejar vacío para mantenerla" : "Contraseña temporal"}
+              placeholder={isEditing ? "Dejar vacío para mantenerla" : "Se genera automáticamente si queda vacío"}
               disabled={loading}
-              required={!isEditing}
             />
           </label>
 
@@ -173,7 +172,7 @@ export function UserModal({
             <button
               type="submit"
               className="primary-button"
-              disabled={loading || !name.trim() || !email.trim() || !roleId || (!isEditing && !password)}
+              disabled={loading || !name.trim() || !email.trim() || !roleId}
             >
               {isEditing ? "Guardar cambios" : "Crear usuario"}
             </button>

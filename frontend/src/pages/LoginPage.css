@@ -1,1 +1,25 @@
-/* Classes: .login-screen, .login-card, .login-form — defined in styles/global.css */
+/* Base login layout lives in styles/global.css. */
+
+.login-notice {
+  border: 1px solid rgba(0, 80, 48, 0.22);
+  background: #f4f9f5;
+  color: #264a34;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: var(--green-800);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 8px;
+}
+
+.text-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}

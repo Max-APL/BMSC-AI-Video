@@ -177,6 +177,21 @@ class Settings:
     storage_dir: Path = _env_path_with_default("VIDEO_STORAGE_DIR", BASE_DIR / "storage")
     ffmpeg_bin: str = os.getenv("FFMPEG_BIN", "ffmpeg").strip().strip("\"'")
 
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "change-this-secret-in-production")
+    access_token_expire_minutes: int = _env_int("ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24 * 7)
+
+    email_brand_name: str = os.getenv("EMAIL_BRAND_NAME", "AI Video").strip() or "AI Video"
+    smtp_enabled: bool = _env_bool("SMTP_ENABLED", False)
+    smtp_host: str = os.getenv("SMTP_HOST", "").strip()
+    smtp_port: int = _env_int("SMTP_PORT", 25)
+    smtp_from: str = os.getenv("SMTP_FROM", "").strip()
+    smtp_timeout: int = _env_int("SMTP_TIMEOUT", 10)
+
+    auth_max_failed_login_attempts: int = _env_int("AUTH_MAX_FAILED_LOGIN_ATTEMPTS", 5)
+    auth_lockout_minutes: int = _env_int("AUTH_LOCKOUT_MINUTES", 15)
+    auth_code_expire_minutes: int = _env_int("AUTH_CODE_EXPIRE_MINUTES", 15)
+    auth_code_max_attempts: int = _env_int("AUTH_CODE_MAX_ATTEMPTS", 5)
+
     inference_device: str = _effective_inference_device()
     whisper_model: str = os.getenv("WHISPER_MODEL", "base")
     whisper_device: str = _default_whisper_device()
