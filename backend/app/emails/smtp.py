@@ -44,6 +44,6 @@ def send_email(to_addr: str, content: EmailContent) -> None:
             settings.smtp_port,
             timeout=settings.smtp_timeout,
         ) as smtp:
-            smtp.send_message(message)
+            smtp.send_message(message, from_addr=settings.smtp_from, to_addrs=[to_addr])
     except Exception as exc:
         raise EmailDeliveryError(f"No se pudo enviar el correo a {to_addr}") from exc

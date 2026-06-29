@@ -102,9 +102,11 @@ def test_send_email_uses_configured_smtp(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def send_message(self, message):
+        def send_message(self, message, from_addr=None, to_addrs=None):
             sent["to"] = message["To"]
             sent["subject"] = message["Subject"]
+            sent["from_addr"] = from_addr
+            sent["to_addrs"] = to_addrs
 
     monkeypatch.setattr("app.emails.smtp.smtplib.SMTP", FakeSMTP)
     original = {
@@ -133,4 +135,6 @@ def test_send_email_uses_configured_smtp(monkeypatch):
     assert sent["port"] == 1025
     assert sent["timeout"] == 10
     assert sent["to"] == "user@bmsc.com.bo"
+    assert sent["from_addr"] == "no-reply@bmsc.local"
+    assert sent["to_addrs"] == ["user@bmsc.com.bo"]
     assert "AI Video" in sent["subject"]
