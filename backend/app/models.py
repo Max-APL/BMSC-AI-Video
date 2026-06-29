@@ -38,7 +38,7 @@ class UserBase(BaseModel):
     role_id: str
 
 class UserCreate(UserBase):
-    password: str
+    password: Optional[str] = None
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
@@ -56,10 +56,28 @@ class UserResponse(UserBase):
     disabled_reason: Optional[str] = None
     failed_login_attempts: int = 0
     role: Optional[RoleResponse] = None
+    locked_until: Optional[str] = None
+    force_password_change: bool = False
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class FirstLoginCompleteRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str = Field(..., min_length=8)
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str = Field(..., min_length=8)
 
 
 class VideoStatus(str, Enum):

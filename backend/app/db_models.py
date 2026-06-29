@@ -25,6 +25,22 @@ class DBUser(Base):
     disabled_at = Column(String, nullable=True)
     disabled_reason = Column(String, nullable=True)
     failed_login_attempts = Column(Integer, nullable=False, default=0)
+    locked_until = Column(String, nullable=True)
+    force_password_change = Column(Boolean, nullable=False, default=False)
+    password_changed_at = Column(String, nullable=True)
+    token_version = Column(Integer, nullable=False, default=0)
+
+class DBAuthCode(Base):
+    __tablename__ = "auth_codes"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), index=True, nullable=False)
+    purpose = Column(String, index=True, nullable=False)
+    code_hash = Column(String, nullable=False)
+    expires_at = Column(String, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    consumed_at = Column(String, nullable=True)
+    created_at = Column(String, nullable=False)
 
 class DBArea(Base):
     __tablename__ = "areas"

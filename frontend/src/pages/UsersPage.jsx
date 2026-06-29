@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Edit2, Plus, Trash2, UserCheck, UserX, Users } from "lucide-react";
+import { Edit2, KeyRound, LockOpen, Plus, Trash2, UserCheck, UserX } from "lucide-react";
 import { Topbar } from "@/components/layout/Topbar";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { UserModal } from "@/components/modals/UserModal";
@@ -7,7 +7,13 @@ import { useVideos } from "@/context/VideosContext";
 import { useAuth } from "@/context/AuthContext";
 import { useUsers } from "@/hooks/useUsers";
 import { useRoles } from "@/hooks/useRoles";
-import { createUser, deleteUser, updateUser } from "@/services/users";
+import {
+  createUser,
+  deleteUser,
+  resetUserPassword,
+  unlockUser,
+  updateUser,
+} from "@/services/users";
 import "./UsersPage.css";
 
 export function UsersPage() {
@@ -22,27 +28,32 @@ export function UsersPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [modalError, setModalError] = useState("");
+  const [notice, setNotice] = useState("");
 
   function openCreate() {
     setEditingUser(null);
     setModalError("");
+    setNotice("");
     setModalOpen(true);
   }
 
   function openEdit(user) {
     setEditingUser(user);
     setModalError("");
+    setNotice("");
     setModalOpen(true);
   }
 
   async function handleSaveUser(payload) {
     setActionLoading(true);
     setModalError("");
+    setNotice("");
     try {
       if (editingUser) {
         await updateUser(editingUser.id, payload);
       } else {
         await createUser(payload);
+        setNotice("Usuario creado. Se envió la contraseña temporal por correo.");
       }
       setModalOpen(false);
       setEditingUser(null);
@@ -58,9 +69,38 @@ export function UsersPage() {
   async function handleDeleteUser() {
     if (!deleteTarget) return;
     setActionLoading(true);
+    setNotice("");
     try {
       await deleteUser(deleteTarget.id);
       setDeleteTarget(null);
+      await loadUsersList();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleResetPassword(userId) {
+    setActionLoading(true);
+    setNotice("");
+    try {
+      await resetUserPassword(userId);
+      setNotice("Contraseña temporal enviada por correo.");
+      await loadUsersList();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleUnlockUser(userId) {
+    setActionLoading(true);
+    setNotice("");
+    try {
+      await unlockUser(userId);
+      setNotice("Cuenta desbloqueada.");
       await loadUsersList();
     } catch (err) {
       setError(err.message);
@@ -91,6 +131,8 @@ export function UsersPage() {
         </div>
 
         <div className="org-grid">
+          {notice && <div className="area-card user-notice-card">{notice}</div>}
+
           {!canManageUsers && (
             <div className="area-card user-readonly-card">
               <h3>Modo consulta</h3>
@@ -119,13 +161,20 @@ export function UsersPage() {
                 <span className={u.is_disabled ? "user-status-badge disabled" : "user-status-badge enabled"}>
                   {u.is_disabled ? "Deshabilitado" : "Habilitado"}
                 </span>
+                {u.force_password_change && (
+                  <span className="user-status-badge pending">Cambio pendiente</span>
+                )}
+                {u.locked_until && (
+                  <span className="user-status-badge locked">Bloqueado</span>
+                )}
               </div>
 
-              {(u.role?.name !== "Super Admin" || u.disabled_reason) && (
+              {(u.role?.name !== "Super Admin" || u.disabled_reason || u.locked_until) && (
                 <div className="user-card-meta">
                   {u.role?.name !== "Super Admin" && (
                     <span>Intentos fallidos: {u.failed_login_attempts || 0}</span>
                   )}
+                  {u.locked_until && <span>Bloqueado hasta: {u.locked_until}</span>}
                   {u.disabled_reason && <span>{u.disabled_reason}</span>}
                 </div>
               )}
@@ -136,15 +185,36 @@ export function UsersPage() {
                     type="button"
                     className="secondary-button compact"
                     onClick={() => openEdit(u)}
+                    disabled={actionLoading}
                   >
                     <Edit2 size={14} />
                     Editar
                   </button>
                   <button
                     type="button"
+                    className="secondary-button compact"
+                    onClick={() => handleResetPassword(u.id)}
+                    disabled={actionLoading}
+                  >
+                    <KeyRound size={14} />
+                    Restablecer
+                  </button>
+                  {u.locked_until && (
+                    <button
+                      type="button"
+                      className="secondary-button compact"
+                      onClick={() => handleUnlockUser(u.id)}
+                      disabled={actionLoading}
+                    >
+                      <LockOpen size={14} />
+                      Desbloquear
+                    </button>
+                  )}
+                  <button
+                    type="button"
                     className="danger-button compact"
                     onClick={() => setDeleteTarget(u)}
-                    disabled={u.id === currentUser?.id}
+                    disabled={actionLoading || u.id === currentUser?.id}
                     title={u.id === currentUser?.id ? "No puedes eliminar tu propio usuario" : "Eliminar usuario"}
                   >
                     <Trash2 size={14} />

@@ -29,6 +29,21 @@ def ensure_sqlite_schema_columns() -> None:
                 text("ALTER TABLE manuals ADD COLUMN quality_mode VARCHAR NOT NULL DEFAULT 'fast'")
             )
 
+        user_columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()
+        }
+        user_migrations = {
+            "failed_login_attempts": "ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+            "locked_until": "ALTER TABLE users ADD COLUMN locked_until VARCHAR",
+            "force_password_change": "ALTER TABLE users ADD COLUMN force_password_change BOOLEAN NOT NULL DEFAULT 0",
+            "password_changed_at": "ALTER TABLE users ADD COLUMN password_changed_at VARCHAR",
+            "token_version": "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, statement in user_migrations.items():
+            if user_columns and column not in user_columns:
+                conn.execute(text(statement))
+
 def get_db():
     db = SessionLocal()
     try:

@@ -183,7 +183,8 @@ erDiagram
 | Audio extraction | ffmpeg (system binary) + imageio-ffmpeg |
 | Search index | scikit-learn TF-IDF + cosine similarity |
 | LLM inference | llama-cpp-python (optional, GGUF models) |
-| Authentication | JWT (PyJWT) + bcrypt password hashing |
+| Authentication | JWT (PyJWT) + bcrypt password hashing, email codes, lockout policy |
+| Email delivery | SMTP relay / Mailpit via Python stdlib |
 | Document export | python-docx (DOCX), reportlab (PDF) |
 | Python version | 3.10+ |
 
@@ -223,6 +224,7 @@ BMSC-AI-Video/
 │   │   ├── screenshots.py        # Frame capture from video
 │   │   ├── storage.py            # File system persistence helpers
 │   │   ├── timecodes.py          # Timecode formatting utilities
+│   │   ├── emails/               # Email templates, renderer, and SMTP sender
 │   │   └── routers/              # Auth, areas, users, roles sub-routers
 │   ├── models/                   # GGUF model files (gitignored)
 │   ├── storage/                  # Video files, audio, transcripts, manuals
@@ -393,6 +395,18 @@ All settings are read from `backend/.env`. See `.env.example` for a full templat
 | `VIDEO_STORAGE_DIR` | `./storage` | Directory for video files, audio, and indexes |
 | `HF_HOME` | `./models_cache/huggingface` | Local Hugging Face cache for offline/on-prem model downloads |
 | `FFMPEG_BIN` | `ffmpeg` | Explicit path to ffmpeg binary |
+| `JWT_SECRET_KEY` | `change-this-secret-in-production` | Secret used to sign JWTs and hash email codes. Set a strong production value |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | JWT lifetime in minutes |
+| `EMAIL_BRAND_NAME` | `AI Video` | Product name rendered in security emails |
+| `AUTH_MAX_FAILED_LOGIN_ATTEMPTS` | `5` | Failed login attempts before temporary lockout |
+| `AUTH_LOCKOUT_MINUTES` | `15` | Temporary lockout duration |
+| `AUTH_CODE_EXPIRE_MINUTES` | `15` | First-login and reset code lifetime |
+| `AUTH_CODE_MAX_ATTEMPTS` | `5` | Invalid attempts allowed per email code |
+| `SMTP_ENABLED` | `false` | Enables SMTP delivery. When false, emails are skipped and logged |
+| `SMTP_HOST` | *(empty)* | SMTP relay host |
+| `SMTP_PORT` | `25` | SMTP relay port |
+| `SMTP_FROM` | *(empty)* | Sender address |
+| `SMTP_TIMEOUT` | `10` | SMTP connection timeout in seconds |
 | `INFERENCE_DEVICE` | `cpu` | Single backend inference switch: `cpu` or `cuda` |
 | `WHISPER_MODEL` | `base` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `WHISPER_DEVICE` | derived | Advanced override. Leave empty to use `INFERENCE_DEVICE` |
@@ -420,6 +434,17 @@ All settings are read from `backend/.env`. See `.env.example` for a full templat
 | `LLM_MAX_TOKENS_ANSWER` | `256` | Maximum answer tokens for Q&A |
 | `LLM_MAX_TOKENS_SECTION` | `1000` | Maximum tokens per generated manual section |
 | `CORS_ORIGINS` | `http://localhost:5173,...` | Comma-separated allowed origins |
+
+For local email testing, start Mailpit and use the SMTP settings from
+`backend/.env.example`:
+
+```bash
+docker run --rm --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit
+```
+
+Mailpit captures messages at `http://localhost:8025`. In production inside the
+bank network, point `SMTP_HOST` to the internal relay, for example
+`172.16.17.171:25`, and use `noreply@bmsc.com.bo` as `SMTP_FROM`.
 
 To move the backend between CPU and CUDA, change only `INFERENCE_DEVICE` in
 `backend/.env` and restart the backend:
@@ -472,8 +497,16 @@ All endpoints except `GET /health` require `Authorization: Bearer <token>`.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/auth/token` | Obtain JWT access token |
+| `POST` | `/auth/token` | Login. Returns a JWT or `password_change_required` when a temporary password must be changed |
+| `POST` | `/auth/login` | JSON login equivalent |
+| `POST` | `/auth/first-login/complete` | Confirm first-login code and set a permanent password |
+| `POST` | `/auth/password-reset/request` | Request a password reset code by email |
+| `POST` | `/auth/password-reset/confirm` | Confirm reset code and set a new password |
 | `GET` | `/auth/me` | Current authenticated user profile |
+
+Accounts are locked after the configured number of failed login attempts. The
+lock expires automatically after `AUTH_LOCKOUT_MINUTES`, or an administrator can
+unlock the user from the Users page.
 
 ### Videos
 
@@ -507,7 +540,9 @@ All endpoints except `GET /health` require `Authorization: Bearer <token>`.
 |---|---|---|
 | `GET/POST` | `/areas` | List or create areas |
 | `POST` | `/areas/{id}/subareas` | Add a subarea to an area |
-| `GET/POST` | `/users` | List or create users |
+| `GET/POST` | `/users` | List or create users. New users receive a temporary password by email |
+| `POST` | `/users/{id}/reset-password` | Admin reset: sends a new temporary password and invalidates active sessions |
+| `POST` | `/users/{id}/unlock` | Clear temporary account lockout |
 | `GET/POST` | `/roles` | List or create roles |
 | `PUT` | `/roles/{id}` | Update role permissions and area access |
 | `GET` | `/system/dependencies` | Check ffmpeg availability and version |
